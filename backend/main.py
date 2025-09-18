@@ -1,30 +1,95 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from shared.user.routes import router as user_router
 from shared.auth.routes import router as auth_router
 from shared.admin.routes import router as admin_router
-# Import other routers
+from shared.database import engine, Base
+import time
+import logging
 
-app = FastAPI(title="ClickO API")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Configure CORS
+app = FastAPI(
+    title="ClickO API",
+    description="Service marketplace API",
+    version="1.0.0"
+)
+
+# Configure CORS with optimized settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Admin dashboard URL
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Starting ClickO API...")
+    
+    # Verify database connection
+    try:
+        # Test database connection
+        connection = engine.connect()
+        connection.close()
+        logger.info("✅ Database connection verified")
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {e}")
+        raise e
+    
+    logger.info("✅ ClickO API startup complete")
+
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("🛑 Shutting down ClickO API...")
+    engine.dispose()
+    logger.info("✅ ClickO API shutdown complete")
+
 # Include routers
 app.include_router(auth_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
-# Include other routers
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to ClickO API"}
+    return {"message": "Welcome to ClickO API", "status": "running", "timestamp": time.time()}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Test database connection
+        connection = engine.connect()
+        connection.close()
+        
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+@app.get("/api/status")
+async def api_status():
+    """API status endpoint"""
+    return {
+        "api": "ClickO",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "auth": "/api/auth/*",
+            "users": "/api/users/*",
+            "admin": "/api/admin/*"
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

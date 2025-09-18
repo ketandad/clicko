@@ -7,7 +7,8 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "moduleResolution": "node",
+    "moduleResolution": "node16",
+    "module": "Node16",
     "paths": {
       "@/*": [
         "./*"

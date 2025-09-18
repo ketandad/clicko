@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from ..user.models import User, Agent
-from ..auth.jwt import create_access_token, get_current_user, verify_password
+from ..auth.jwt import create_access_token, get_current_user, verify_password, get_password_hash
 from ..database import get_db
 from datetime import datetime, timedelta
 import sqlalchemy as sa

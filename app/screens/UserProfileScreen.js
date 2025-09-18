@@ -4,7 +4,7 @@ import { Text, Button, TextInput, Divider, ActivityIndicator, Appbar, Switch, Av
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, updateUserProfile, updateUserAddress } from '../services/userService';
-import { colors } from '../config';
+import { colors } from '../theme';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 export default function UserProfileScreen({ navigation }) {

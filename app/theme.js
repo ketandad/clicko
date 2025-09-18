@@ -1,14 +1,17 @@
 import { DefaultTheme } from 'react-native-paper';
-import { colors } from './config';
+import config from './config';
 
 export const theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: colors.primary,
-    accent: colors.secondary,
-    background: colors.background,
-    text: colors.textPrimary,
-    placeholder: colors.textSecondary,
+    primary: config.colors.primary,
+    accent: config.colors.secondary,
+    background: config.colors.background,
+    text: config.colors.text,
+    placeholder: config.colors.textSecondary,
   },
 };
+
+// Export colors for direct usage in components
+export const colors = config.colors;

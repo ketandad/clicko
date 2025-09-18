@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { API_URL } from '../config';
+import config from '../config';
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: config.API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -34,7 +34,7 @@ export const loginUser = async (email, password) => {
     
     const response = await axios({
       method: 'post',
-      url: `${API_URL}/auth/login`,
+      url: `${config.API_URL}/auth/login`,
       data: formData,
       headers: {
         'Content-Type': 'multipart/form-data',

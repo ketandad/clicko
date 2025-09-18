@@ -1,9 +1,9 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../config';
+import config from '../config';
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: config.API_URL,
   headers: {
     'Content-Type': 'application/json',
   },

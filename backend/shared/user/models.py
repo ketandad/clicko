@@ -1,11 +1,8 @@
 from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, DateTime, Table
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
-from geoalchemy2 import Geography
 from datetime import datetime
-
-Base = declarative_base()
+from ..database import Base
 
 class User(Base):
     __tablename__ = "users"
@@ -16,7 +13,8 @@ class User(Base):
     phone = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     address = Column(String, nullable=True)
-    location = Column(Geography(geometry_type='POINT', srid=4326), nullable=True)
+    # Using string for location coordinates as "lat,lng" for SQLite compatibility
+    location = Column(String, nullable=True)  # Format: "latitude,longitude"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_admin = Column(Boolean, default=False)
@@ -98,7 +96,8 @@ class Booking(Base):
     status = Column(String, nullable=False, default="pending")  # pending, accepted, rejected, completed, cancelled
     scheduled_time = Column(DateTime, nullable=False, default=datetime.utcnow)
     visit_charge = Column(Float, nullable=False)
-    user_location = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
+    # Using string for location coordinates as "lat,lng" for SQLite compatibility  
+    user_location = Column(String, nullable=False)  # Format: "latitude,longitude"
     address = Column(String, nullable=False)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

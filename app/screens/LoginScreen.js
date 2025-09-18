@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useAuth } from '../contexts/AuthContext';
 import { loginUser } from '../services/authService';
 import { colors } from '../theme';
+import config from '../config';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -14,6 +15,41 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const navigation = useNavigation();
   const { setUser } = useAuth();
+
+  // Simple API test function
+  const testApiConnection = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      console.log('🧪 Testing API connection...');
+      console.log('API URL:', config.API_URL);
+      
+      // Test health endpoint
+      const response = await fetch(config.API_URL.replace('/api', '/health'), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const result = await response.text();
+      console.log('Health check response:', result);
+      
+      if (response.ok) {
+        console.log('✅ API connection successful!');
+        setError('✅ API connection successful! Backend is reachable.');
+      } else {
+        console.log('❌ API returned error:', response.status);
+        setError(`❌ API error: ${response.status} - ${result}`);
+      }
+    } catch (error) {
+      console.error('❌ API test failed:', error);
+      setError(`❌ Connection failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -61,7 +97,7 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.logoContainer}>
           <Image 
-            source={require('../assets/logo.png')} 
+            source={require('../assets/images/icon.png')} 
             style={styles.logo} 
             resizeMode="contain"
           />
@@ -106,6 +142,17 @@ export default function LoginScreen() {
             disabled={loading}
           >
             Login
+          </Button>
+          
+          <Button
+            mode="outlined"
+            onPress={testApiConnection}
+            style={[styles.button, styles.testButton]}
+            loading={loading}
+            disabled={loading}
+            icon="wifi"
+          >
+            🧪 Test API Connection
           </Button>
           
           <View style={styles.registerContainer}>
@@ -166,6 +213,10 @@ const styles = StyleSheet.create({
   button: {
     padding: 5,
     marginTop: 10,
+  },
+  testButton: {
+    borderColor: colors.primary,
+    borderWidth: 2,
   },
   registerContainer: {
     flexDirection: 'row',

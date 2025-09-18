@@ -25,7 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getCategories, getFeaturedCategories } from '../services/categoryService';
-import { colors } from '../config';
+import { colors } from '../theme';
 
 const { width } = Dimensions.get('window');
 
