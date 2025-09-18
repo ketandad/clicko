@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from shared.user.routes import router as user_router
 from shared.auth.routes import router as auth_router
 from shared.admin.routes import router as admin_router
+from shared.category.routes import router as category_router
 from shared.database import engine, Base
 import time
 import logging
@@ -55,6 +56,7 @@ async def shutdown_event():
 app.include_router(auth_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(category_router, prefix="/api")
 
 @app.get("/")
 async def root():

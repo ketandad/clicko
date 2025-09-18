@@ -1,12 +1,12 @@
 nohup: ignoring input
-/workspaces/clicko/backend/main.py:31: DeprecationWarning: 
+/workspaces/clicko/backend/main.py:32: DeprecationWarning: 
         on_event is deprecated, use lifespan event handlers instead.
 
         Read more about it in the
         [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
         
   @app.on_event("startup")
-/workspaces/clicko/backend/main.py:48: DeprecationWarning: 
+/workspaces/clicko/backend/main.py:49: DeprecationWarning: 
         on_event is deprecated, use lifespan event handlers instead.
 
         Read more about it in the
@@ -14,22 +14,4 @@ nohup: ignoring input
         
   @app.on_event("shutdown")
 INFO:     Will watch for changes in these directories: ['/workspaces/clicko/backend']
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [92455] using StatReload
-INFO:     Started server process [92457]
-INFO:     Waiting for application startup.
-INFO:main:🚀 Starting ClickO API...
-INFO:main:✅ Database connection verified
-INFO:main:✅ ClickO API startup complete
-INFO:     Application startup complete.
-INFO:     4.240.18.226:0 - "GET /health HTTP/1.1" 200 OK
-INFO:     223.233.80.231:0 - "GET /health HTTP/1.1" 200 OK
-WARNING:passlib.handlers.bcrypt:(trapped) error reading bcrypt version
-Traceback (most recent call last):
-  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
-    version = _bcrypt.__about__.__version__
-              ^^^^^^^^^^^^^^^^^
-AttributeError: module 'bcrypt' has no attribute '__about__'
-INFO:     223.233.80.231:0 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     223.233.80.231:0 - "GET /api/categories HTTP/1.1" 422 Unprocessable Entity
-INFO:     223.233.80.231:0 - "GET /api/users/1 HTTP/1.1" 404 Not Found
+ERROR:    [Errno 98] Address already in use

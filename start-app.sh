@@ -62,6 +62,7 @@ echo -e "${YELLOW}📱 Mobile apps will auto-connect to: $BACKEND_URL/api${NC}"
 # Generate future-proof config
 cat > config.js << 'CONFIGEOF'
 // config.js - Auto-generated configuration (Future-proof)
+import { Platform } from 'react-native';
 
 const isBrowser = typeof window !== 'undefined';
 
@@ -71,8 +72,9 @@ if (isBrowser && window.location) {
 }
 
 const getApiUrl = () => {
-  // For React Native / Expo Go - use auto-detected backend URL
-  if (typeof window === 'undefined') {
+  // For React Native / Expo Go - use Platform.OS for reliable mobile detection
+  // Expo Go creates window object even on mobile, so typeof window check fails
+  if (Platform.OS === 'ios' || Platform.OS === 'android') {
     return 'BACKEND_URL_PLACEHOLDER/api';
   }
   

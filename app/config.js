@@ -9,36 +9,23 @@ if (isBrowser && window.location) {
 }
 
 const getApiUrl = () => {
-  console.log('🔍 Environment Detection:');
-  console.log('  Platform.OS:', Platform.OS);
-  console.log('  typeof window:', typeof window);
-  console.log('  hostname:', hostname);
-  
   // For React Native / Expo Go - use Platform.OS for reliable mobile detection
   // Expo Go creates window object even on mobile, so typeof window check fails
   if (Platform.OS === 'ios' || Platform.OS === 'android') {
-    const codespaceUrl = 'https://vigilant-trout-7q6q675j4vq2pg6w-8000.app.github.dev/api';
-    console.log('  🎯 Mobile detected, using Codespaces URL:', codespaceUrl);
-    return codespaceUrl;
+    return 'https://vigilant-trout-7q6q675j4vq2pg6w-8000.app.github.dev/api';
   }
   
   // For web browsers - use current hostname logic
   if (hostname.includes('github.dev') || hostname.includes('githubpreview.dev')) {
-    const url = 'https://' + hostname.replace(/^[^-]+-/, '').replace(/\.github\.dev$/, '') + '-8000.app.github.dev/api';
-    console.log('  🌐 GitHub Codespaces web detected, using:', url);
-    return url;
+    return 'https://' + hostname.replace(/^[^-]+-/, '').replace(/\.github\.dev$/, '') + '-8000.app.github.dev/api';
   }
   
   if (hostname.includes('gitpod.io')) {
-    const url = 'https://8000-' + hostname + '/api';
-    console.log('  🔷 GitPod detected, using:', url);
-    return url;
+    return 'https://8000-' + hostname + '/api';
   }
   
   // Local development fallback
-  const localUrl = 'http://localhost:8000/api';
-  console.log('  🏠 Local development fallback:', localUrl);
-  return localUrl;
+  return 'http://localhost:8000/api';
 };
 
 const config = {

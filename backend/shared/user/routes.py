@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter(prefix="/users", tags=["users"])
 
 # Pydantic models
 class UserProfileUpdate(BaseModel):
