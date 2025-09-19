@@ -18,17 +18,40 @@ export const setAuthToken = (token) => {
 
 export const registerUser = async (userData) => {
   try {
+    console.log('🔐 Registration: Attempting registration for:', userData.email);
+    console.log('🔐 Registration: Request URL:', `${config.API_URL}/auth/register`);
+    console.log('🔐 Registration: Request data:', { ...userData, password: '[HIDDEN]' });
+    
     const response = await api.post('/auth/register', userData);
+    
+    console.log('✅ Registration: Success for:', userData.email);
+    console.log('✅ Registration: Response data:', { 
+      ...response.data, 
+      access_token: response.data.access_token ? '[TOKEN_PRESENT]' : '[NO_TOKEN]' 
+    });
+    
     return response.data;
   } catch (error) {
-    console.error('Registration error:', error.response?.data || error.message);
+    console.error('❌ Registration error for:', userData.email);
+    console.error('❌ Registration error details:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message,
+      url: error.config?.url,
+      method: error.config?.method
+    });
     throw error;
   }
 };
 
 export const loginUser = async (email, password) => {
   try {
-    const formData = new FormData();
+    console.log('🔐 Login: Attempting login for:', email);
+    console.log('🔐 Login: Request URL:', `${config.API_URL}/auth/login`);
+    
+    // Create URL-encoded form data for OAuth2PasswordRequestForm
+    const formData = new URLSearchParams();
     formData.append('username', email);
     formData.append('password', password);
     
@@ -37,8 +60,14 @@ export const loginUser = async (email, password) => {
       url: `${config.API_URL}/auth/login`,
       data: formData,
       headers: {
-        'Content-Type': 'multipart/form-data',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+    });
+    
+    console.log('✅ Login: Success for:', email);
+    console.log('✅ Login: Response data:', { 
+      ...response.data, 
+      access_token: response.data.access_token ? '[TOKEN_PRESENT]' : '[NO_TOKEN]' 
     });
     
     if (response.data.access_token) {
@@ -47,7 +76,16 @@ export const loginUser = async (email, password) => {
     
     return response.data;
   } catch (error) {
-    console.error('Login error:', error.response?.data || error.message);
+    console.error('❌ Login error for:', email);
+    console.error('❌ Login error details:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message,
+      url: error.config?.url,
+      method: error.config?.method,
+      headers: error.config?.headers
+    });
     throw error;
   }
 };

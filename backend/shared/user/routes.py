@@ -11,6 +11,18 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+# Debug route to test authentication
+@router.get("/me")
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current authenticated user info"""
+    return {
+        "id": current_user.id,
+        "name": current_user.name,
+        "email": current_user.email,
+        "is_agent": current_user.is_agent,
+        "message": "Authentication working"
+    }
+
 # Pydantic models
 class UserProfileUpdate(BaseModel):
     name: Optional[str] = None
@@ -58,10 +70,33 @@ def verify_kyc(
     return {"message": f"KYC status updated to {status}"}
 
 # User profile endpoints
+@router.get("/{user_id}/")
 @router.get("/{user_id}")
 async def get_user_profile(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Add some debug logging
+    print(f"DEBUG: Requesting profile for user_id: {user_id}")
+    print(f"DEBUG: Type of current_user: {type(current_user)}")
+    print(f"DEBUG: Current_user content: {current_user}")
+    
+    # Handle both User object and dict scenarios  
+    if hasattr(current_user, 'id'):
+        current_user_id = current_user.id
+        current_user_email = getattr(current_user, 'email', 'unknown')
+        print(f"DEBUG: User object - ID: {current_user_id}, Email: {current_user_email}")
+    elif isinstance(current_user, dict):
+        current_user_id = current_user.get('id') or current_user.get('user_id')
+        current_user_email = current_user.get('email', 'unknown')
+        print(f"DEBUG: Dict object - ID: {current_user_id}, Email: {current_user_email}")
+    else:
+        print(f"DEBUG: Unknown current_user type: {type(current_user)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication error"
+        )
+    
     # Users can only access their own profile
-    if current_user.id != user_id and not current_user.is_admin:
+    if current_user_id != user_id:
+        print(f"DEBUG: Access denied - current user {current_user_id} trying to access {user_id}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
@@ -88,6 +123,7 @@ async def get_user_profile(user_id: int, db: Session = Depends(get_db), current_
         "is_agent": user.is_agent
     }
 
+@router.put("/{user_id}/")
 @router.put("/{user_id}")
 async def update_user_profile(
     user_id: int, 
@@ -131,6 +167,7 @@ async def update_user_profile(
         "updated_at": user.updated_at
     }
 
+@router.put("/{user_id}/address/")
 @router.put("/{user_id}/address")
 async def update_user_address(
     user_id: int, 
@@ -158,6 +195,7 @@ async def update_user_address(
     
     return {"message": "Address updated successfully"}
 
+@router.post("/{user_id}/profile-image/")
 @router.post("/{user_id}/profile-image")
 async def upload_profile_image(
     user_id: int,

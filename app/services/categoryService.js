@@ -25,7 +25,13 @@ api.interceptors.request.use(
 
 export const getCategories = async () => {
   try {
-    const response = await api.get('/categories');
+    const response = await api.get('/categories/');
+    
+    // Add error checking for response data
+    if (!response.data || !Array.isArray(response.data)) {
+      console.error('Invalid categories response:', response);
+      throw new Error('Invalid response format from categories API');
+    }
     
     // Transform the data to include placeholder images for categories that don't have icons
     const categoriesWithIcons = response.data.map(category => ({
@@ -42,7 +48,14 @@ export const getCategories = async () => {
 
 export const getFeaturedCategories = async () => {
   try {
-    const response = await api.get('/categories/featured');
+    const response = await api.get('/categories/featured/');
+    
+    // Add error checking for response data
+    if (!response.data || !Array.isArray(response.data)) {
+      console.error('Invalid featured categories response:', response);
+      // Return default featured categories instead of throwing
+      return getDefaultFeaturedCategories();
+    }
     
     // Transform the data to include placeholder images
     const featuredWithIcons = response.data.map(category => ({
@@ -60,7 +73,7 @@ export const getFeaturedCategories = async () => {
 
 export const getCategoryById = async (categoryId) => {
   try {
-    const response = await api.get(`/categories/${categoryId}`);
+    const response = await api.get(`/categories/${categoryId}/`);
     return response.data;
   } catch (error) {
     console.error(`Error fetching category ${categoryId}:`, error.response?.data || error.message);

@@ -14,7 +14,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigation = useNavigation();
-  const { setUser } = useAuth();
+  const { login } = useAuth();
 
   // Simple API test function
   const testApiConnection = async () => {
@@ -61,26 +61,22 @@ export default function LoginScreen() {
     setError('');
 
     try {
+      console.log('🔐 LoginScreen: Attempting login for:', email);
       const response = await loginUser(email, password);
+      console.log('✅ LoginScreen: Login successful, response:', response);
       
-      // Save the token to secure storage
-      await SecureStore.setItemAsync('userToken', response.access_token);
-      await SecureStore.setItemAsync('userId', response.user_id.toString());
-      await SecureStore.setItemAsync('userName', response.name);
-      await SecureStore.setItemAsync('isAgent', response.is_agent.toString());
-      
-      // Update auth context
-      setUser({
+      // Use AuthContext login function for proper state management
+      const userData = {
         id: response.user_id,
         name: response.name,
         isAgent: response.is_agent,
         token: response.access_token
-      });
+      };
       
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Main' }],
-      });
+      await login(userData);
+      console.log('✅ LoginScreen: Login process complete');
+      
+      // No need for navigation.reset - AuthContext will handle the navigation automatically
     } catch (err) {
       console.error(err);
       setError('Invalid email or password');

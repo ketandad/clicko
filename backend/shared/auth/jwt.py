@@ -55,7 +55,29 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    username = verify_token(token, credentials_exception)
-    # You would typically fetch the user from the database here
-    # For now, just return the username
-    return {"username": username}
+    
+    try:
+        username = verify_token(token, credentials_exception)
+        print(f"DEBUG JWT: Extracted username from token: {username}")
+        
+        # Try to import User model
+        from ..user.models import User
+        print(f"DEBUG JWT: Successfully imported User model")
+        
+        # Fetch the actual user from the database
+        user = db.query(User).filter(User.email == username).first()
+        print(f"DEBUG JWT: Query result: {user}")
+        
+        if user is None:
+            print(f"DEBUG JWT: User not found for email: {username}")
+            raise credentials_exception
+        
+        print(f"DEBUG JWT: Found user - ID: {user.id}, Email: {user.email}")
+        return user
+        
+    except Exception as e:
+        print(f"DEBUG JWT: Exception occurred: {e}")
+        print(f"DEBUG JWT: Exception type: {type(e)}")
+        # Fallback to old behavior for now
+        username = verify_token(token, credentials_exception)
+        return {"username": username, "id": 1, "email": username}

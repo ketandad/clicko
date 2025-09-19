@@ -43,6 +43,7 @@ async def get_all_categories(db: Session = Depends(get_db)):
         for category, agent_count in categories
     ]
 
+@router.get("/featured/", response_model=List[CategoryResponse])
 @router.get("/featured", response_model=List[CategoryResponse])
 async def get_featured_categories(db: Session = Depends(get_db)):
     """
@@ -71,6 +72,7 @@ async def get_featured_categories(db: Session = Depends(get_db)):
         for category, agent_count in featured
     ]
 
+@router.get("/{category_id}/", response_model=CategoryResponse)
 @router.get("/{category_id}", response_model=CategoryResponse)
 async def get_category_by_id(category_id: int, db: Session = Depends(get_db)):
     """

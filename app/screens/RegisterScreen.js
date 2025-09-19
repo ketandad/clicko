@@ -74,10 +74,7 @@ export default function RegisterScreen() {
         token: response.access_token
       });
       
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Main' }],
-      });
+      // No need for navigation.reset - AuthContext will handle the navigation automatically
     } catch (err) {
       console.error(err);
       if (err.response && err.response.data && err.response.data.detail) {
