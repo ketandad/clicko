@@ -1,0 +1,135 @@
+nohup: ignoring input
+/workspaces/clicko/backend/main.py:33: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+/workspaces/clicko/backend/main.py:50: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+INFO:     Will watch for changes in these directories: ['/workspaces/clicko/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [84059] using StatReload
+INFO:     Started server process [84062]
+INFO:     Waiting for application startup.
+INFO:main:🚀 Starting ClickO API...
+INFO:main:✅ Database connection verified
+INFO:main:✅ ClickO API startup complete
+INFO:     Application startup complete.
+INFO:     20.192.21.55:0 - "GET /health HTTP/1.1" 200 OK
+WARNING:passlib.handlers.bcrypt:(trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "GET /health HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "GET /health HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "GET /health HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 200 OK
+DEBUG JWT: Extracted username from token: testagent@gmail.com
+DEBUG JWT: Successfully imported User model
+DEBUG JWT: Query result: <shared.user.models.User object at 0x7da117e60170>
+DEBUG JWT: Found user - ID: 8, Email: testagent@gmail.com
+INFO:     20.192.21.55:0 - "POST /api/agents/create HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/8 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/1 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/2 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/3 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/4 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/5 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/6 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/7 HTTP/1.1" 404 Not Found
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/8 HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/9 HTTP/1.1" 404 Not Found
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/10 HTTP/1.1" 404 Not Found
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/9 HTTP/1.1" 404 Not Found
+DEBUG JWT: Extracted username from token: sayali.test@gmail.com
+DEBUG JWT: Successfully imported User model
+DEBUG JWT: Query result: <shared.user.models.User object at 0x7da117e8ec90>
+DEBUG JWT: Found user - ID: 9, Email: sayali.test@gmail.com
+INFO:     20.192.21.55:0 - "POST /api/agents/create HTTP/1.1" 422 Unprocessable Entity
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/9 HTTP/1.1" 404 Not Found
+DEBUG JWT: Extracted username from token: sayali.test@gmail.com
+DEBUG JWT: Successfully imported User model
+DEBUG JWT: Query result: <shared.user.models.User object at 0x7da117ea4770>
+DEBUG JWT: Found user - ID: 9, Email: sayali.test@gmail.com
+INFO:     20.192.21.55:0 - "POST /api/agents/create HTTP/1.1" 422 Unprocessable Entity
+INFO:     20.192.21.55:0 - "GET /api/categories/ HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/9 HTTP/1.1" 404 Not Found
+DEBUG JWT: Extracted username from token: sayali.test@gmail.com
+DEBUG JWT: Successfully imported User model
+DEBUG JWT: Query result: <shared.user.models.User object at 0x7da117ea4770>
+DEBUG JWT: Found user - ID: 9, Email: sayali.test@gmail.com
+INFO:     20.192.21.55:0 - "POST /api/agents/create HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "POST /api/auth/register HTTP/1.1" 400 Bad Request
+INFO:     20.192.21.55:0 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     20.192.21.55:0 - "GET /api/agents/profile/9 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:main:🛑 Shutting down ClickO API...
+INFO:main:✅ ClickO API shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [84062]
+INFO:     Stopping reloader process [84059]

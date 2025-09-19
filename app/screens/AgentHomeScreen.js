@@ -1,74 +1,508 @@
-import * as React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Text, Banner, Button } from 'react-native-paper';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  StatusBar,
+  RefreshControl,
+  Dimensions,
+  Animated,
+  Alert,
+} from 'react-native';
+import {
+  Text,
+  Card,
+  Button,
+  Switch,
+  Surface,
+  Avatar,
+  FAB,
+  Chip,
+  ProgressBar,
+} from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import * as Location from 'expo-location';
+import { useAuth } from '../contexts/AuthContext';
+import { updateAgentStatus, getAgentStats, updateAgentLocation } from '../services/agentService';
+
+const { width } = Dimensions.get('window');
+
+// Enhanced professional theme colors - no green
+const darkTheme = {
+  background: '#0A0A0A',
+  surface: '#1A1A1A',
+  surfaceVariant: '#252525', 
+  primary: '#2563EB', // Blue
+  primaryLight: '#3B82F6',
+  secondary: '#7C3AED', // Purple
+  secondaryLight: '#8B5CF6',
+  accent: '#DC2626', // Red
+  accentLight: '#EF4444',
+  text: '#FFFFFF',
+  textSecondary: '#E0E0E0',
+  textTertiary: '#BDBDBD',
+  border: '#333333',
+  borderLight: '#424242',
+  success: '#059669', // Teal instead of green
+  warning: '#F59E0B',
+  error: '#EF4444',
+  gradient: ['#1A1A1A', '#2D2D2D', '#1A1A1A'],
+  headerGradient: ['#1E3A8A', '#3B82F6', '#6366F1'], // Blue gradient
+  cardGradient: ['#1A1A1A', '#252525'],
+  earning: '#059669', // Teal for earnings
+  gold: '#F59E0B', // Amber instead of gold
+};
 
 export default function AgentHomeScreen() {
-  // Dummy state for agent status and offline timer
-  const [status, setStatus] = React.useState('offline');
-  const [offlineUntil, setOfflineUntil] = React.useState(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
-  const [showBanner, setShowBanner] = React.useState(true);
+  const navigation = useNavigation();
+  const { user } = useAuth();
+  const [isOnline, setIsOnline] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [location, setLocation] = useState(null);
+  const [currentArea, setCurrentArea] = useState('Loading location...');
+  const [fadeAnim] = useState(new Animated.Value(0));
+  
+  // Agent data - using real user data, default to 0/null for dummy values
+  const [agentData, setAgentData] = useState({
+    name: user?.name || 'Agent',
+    rating: 0, // Will be updated from API
+    totalEarnings: 0, // Will be updated from API
+    todayEarnings: 0, // Will be updated from API
+    pendingBookings: 0,
+    completedBookings: 0, // Will be updated from API
+    categories: [], // Will be updated from API
+    isVerified: user?.agentOnboardingCompleted || true,
+    profileImage: null,
+    walletBalance: user?.walletBalance || 0,
+    serviceArea: 'Service Area', // Default service area, will be updated
+  });
 
-  // Countdown timer logic
-  const [remaining, setRemaining] = React.useState(offlineUntil - Date.now());
-  React.useEffect(() => {
-    if (status === 'offline') {
-      const interval = setInterval(() => {
-        setRemaining(offlineUntil - Date.now());
-        if (Date.now() >= offlineUntil) {
-          setStatus('online');
-          setShowBanner(false);
-          clearInterval(interval);
-        }
-      }, 1000);
-      return () => clearInterval(interval);
+  const [todayStats, setTodayStats] = useState({
+    bookings: 0, // Will be updated from API
+    earnings: 0, // Will be updated from API
+    distance: 0, // Will be updated from API
+    rating: 0, // Will be updated from API
+  });
+
+  // Remove dummy pending requests - will be replaced with real data
+  const [pendingRequests, setPendingRequests] = useState([]);
+
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content');
+    loadAgentData();
+    
+    // Update agent data with real user info
+    if (user) {
+      setAgentData(prev => ({
+        ...prev,
+        name: user.name || 'Agent',
+        isVerified: user.agentOnboardingCompleted || true,
+        walletBalance: user.walletBalance || 0,
+      }));
     }
-  }, [status, offlineUntil]);
+    
+    // Fade in animation
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
+  }, [user]);
 
-  // Format timer
-  const formatTime = (ms) => {
-    const totalSec = Math.max(0, Math.floor(ms / 1000));
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  const loadAgentData = async () => {
+    try {
+      setLoading(true);
+      console.log('🔄 Loading agent data and stats...');
+      
+      // Fetch real stats from backend
+      const stats = await getAgentStats();
+      
+      // Update todayStats with real data
+      setTodayStats({
+        bookings: stats.today_bookings,
+        earnings: stats.today_earnings,
+        distance: stats.today_distance,
+        rating: stats.avg_rating,
+      });
+      
+      // Update agent data with total stats
+      setAgentData(prev => ({
+        ...prev,
+        totalEarnings: stats.total_earnings,
+        completedBookings: stats.total_bookings,
+        rating: stats.avg_rating,
+      }));
+      
+      console.log('✅ Agent data loaded successfully');
+    } catch (error) {
+      console.error('❌ Error loading agent data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  return (
-    <View style={styles.container}>
-      {showBanner && status === 'offline' && (
-        <Banner
-          visible={true}
-          actions={[
-            {
-              label: 'Go Online',
-              onPress: () => {
-                setStatus('online');
-                setShowBanner(false);
-              },
-            },
-          ]}
-          icon="alert"
-          style={{ backgroundColor: '#ffebee', borderColor: 'red', borderWidth: 1 }}
-        >
-          <Text style={{ color: 'red', fontWeight: 'bold' }}>
-            You are offline for 2 hours. Go Online?
-          </Text>
-          <Text style={{ color: 'red' }}>
-            Time remaining: {formatTime(remaining)}
-          </Text>
-        </Banner>
-      )}
-      <View style={[styles.statusBar, { backgroundColor: status === 'online' ? '#e8f5e9' : '#ffebee' }] }>
-        <Text style={{ color: status === 'online' ? 'green' : 'red', fontWeight: 'bold' }}>
-          Status: {status === 'online' ? 'Online' : 'Offline'}
+  const getCurrentLocation = async () => {
+    try {
+      console.log('📍 Getting current location...');
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('❌ Location permission not granted');
+        setCurrentArea('Location access denied');
+        return;
+      }
+
+      let locationResult = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      
+      const coords = locationResult.coords;
+      setLocation(coords);
+      console.log('📍 Location coordinates:', coords);
+
+      // Reverse geocoding to get area name
+      try {
+        let geocodeResult = await Location.reverseGeocodeAsync({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
+
+        if (geocodeResult && geocodeResult.length > 0) {
+          const address = geocodeResult[0];
+          // Prioritize area/sublocality over city
+          const area = address.sublocality || address.district || address.city || 'Unknown Area';
+          const region = address.region || address.city || '';
+          const displayArea = region ? `${area}, ${region}` : area;
+          
+          setCurrentArea(displayArea);
+          console.log('🏘️ Current area:', displayArea);
+          
+          // Send location update to backend
+          updateAgentLocation(coords.latitude, coords.longitude, displayArea);
+        } else {
+          setCurrentArea('Area unavailable');
+        }
+      } catch (geocodeError) {
+        console.error('❌ Geocoding error:', geocodeError);
+        setCurrentArea('Area lookup failed');
+      }
+
+    } catch (error) {
+      console.error('❌ Error getting location:', error);
+      setCurrentArea('Location unavailable');
+    }
+  };
+
+  // Setup automatic location updates every 5 minutes
+  useEffect(() => {
+    getCurrentLocation(); // Initial location fetch
+    
+    const locationInterval = setInterval(() => {
+      console.log('🔄 Auto-updating location...');
+      getCurrentLocation();
+    }, 5 * 60 * 1000); // 5 minutes in milliseconds
+
+    // Cleanup interval on component unmount
+    return () => {
+      clearInterval(locationInterval);
+      console.log('🛑 Location auto-update stopped');
+    };
+  }, []);
+
+  const toggleOnlineStatus = async () => {
+    try {
+      const newStatus = !isOnline;
+      console.log('🔄 Updating agent status to:', newStatus ? 'online' : 'offline');
+      
+      // Call the API to update status in database
+      await updateAgentStatus(newStatus);
+      
+      // Update local state only after successful API call
+      setIsOnline(newStatus);
+      console.log('✅ Agent status updated successfully:', newStatus ? 'Online' : 'Offline');
+    } catch (error) {
+      console.error('❌ Error updating agent status:', error);
+      // Show error message to user
+      Alert.alert(
+        'Status Update Failed',
+        'Could not update your online status. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAgentData();
+    setRefreshing(false);
+  };
+
+  const acceptBooking = (bookingId) => {
+    console.log('Accepting booking:', bookingId);
+    // TODO: Accept booking API call
+    navigation.navigate('BookingDetails', { bookingId });
+  };
+
+  const rejectBooking = (bookingId) => {
+    console.log('Rejecting booking:', bookingId);
+    setPendingRequests(prev => prev.filter(req => req.id !== bookingId));
+  };
+
+  const renderHeader = () => (
+    <LinearGradient colors={darkTheme.headerGradient} style={styles.header}>
+      <SafeAreaView>
+        <View style={styles.headerContent}>
+          <View style={styles.profileSection}>
+            <View style={styles.avatarContainer}>
+              <Avatar.Text 
+                size={40} 
+                label={agentData.name.charAt(0).toUpperCase()} 
+                style={styles.avatar}
+                labelStyle={styles.avatarLabel}
+              />
+              {agentData.isVerified && (
+                <View style={styles.verifiedBadge}>
+                  <MaterialCommunityIcons name="check-decagram" size={12} color={darkTheme.gold} />
+                </View>
+              )}
+            </View>
+            <View style={styles.profileInfo}>
+              <Text style={styles.agentName}>{agentData.name}</Text>
+              <View style={styles.ratingContainer}>
+                <MaterialCommunityIcons name="star" size={14} color={darkTheme.gold} />
+                <Text style={styles.rating}>{agentData.rating}</Text>
+              </View>
+            </View>
+          </View>
+          
+          <View style={styles.onlineToggle}>
+            <View style={[styles.statusIndicator, { backgroundColor: isOnline ? darkTheme.success : darkTheme.error }]} />
+            <Text style={styles.statusText}>
+              {isOnline ? 'Online' : 'Offline'}
+            </Text>
+            <Switch
+              value={isOnline}
+              onValueChange={toggleOnlineStatus}
+              trackColor={{ false: '#424242', true: darkTheme.success }}
+              thumbColor={isOnline ? '#FFFFFF' : '#BDBDBD'}
+              style={styles.switch}
+            />
+          </View>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+
+  const renderStatsCards = () => (
+    <View style={styles.statsContainer}>
+      <Card style={[styles.statCard, { backgroundColor: darkTheme.surface }]}>
+        <Card.Content style={styles.statContent}>
+          <MaterialCommunityIcons name="currency-inr" size={24} color={darkTheme.success} />
+          <Text style={[styles.statValue, { color: darkTheme.text }]}>₹{todayStats.earnings}</Text>
+          <Text style={[styles.statLabel, { color: darkTheme.textSecondary }]}>Today's Earnings</Text>
+        </Card.Content>
+      </Card>
+      
+      <Card style={[styles.statCard, { backgroundColor: darkTheme.surface }]}>
+        <Card.Content style={styles.statContent}>
+          <MaterialCommunityIcons name="clipboard-list" size={24} color={darkTheme.secondary} />
+          <Text style={[styles.statValue, { color: darkTheme.text }]}>{todayStats.bookings}</Text>
+          <Text style={[styles.statLabel, { color: darkTheme.textSecondary }]}>Bookings</Text>
+        </Card.Content>
+      </Card>
+      
+      <Card style={[styles.statCard, { backgroundColor: darkTheme.surface }]}>
+        <Card.Content style={styles.statContent}>
+          <MaterialCommunityIcons name="map-marker-distance" size={24} color={darkTheme.accent} />
+          <Text style={[styles.statValue, { color: darkTheme.text }]}>{todayStats.distance}km</Text>
+          <Text style={[styles.statLabel, { color: darkTheme.textSecondary }]}>Distance</Text>
+        </Card.Content>
+      </Card>
+    </View>
+  );
+
+  const renderEarningsOverview = () => (
+    <Card style={[styles.earningsCard, { backgroundColor: darkTheme.surface }]}>
+      <Card.Content>
+        <View style={styles.earningsHeader}>
+          <Text style={[styles.sectionTitle, { color: darkTheme.text }]}>Earnings Overview</Text>
+          <TouchableOpacity>
+            <Text style={{ color: darkTheme.primary }}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.earningsRow}>
+          <View style={styles.earningsItem}>
+            <Text style={[styles.earningsLabel, { color: darkTheme.textSecondary }]}>This Week</Text>
+            <Text style={[styles.earningsValue, { color: darkTheme.text }]}>₹{agentData.weeklyEarnings || 0}</Text>
+          </View>
+          <View style={styles.earningsItem}>
+            <Text style={[styles.earningsLabel, { color: darkTheme.textSecondary }]}>This Month</Text>
+            <Text style={[styles.earningsValue, { color: darkTheme.text }]}>₹{agentData.totalEarnings}</Text>
+          </View>
+        </View>
+        
+        <ProgressBar 
+          progress={agentData.monthlyProgress || 0} 
+          color={darkTheme.success} 
+          style={styles.progressBar} 
+        />
+        <Text style={[styles.progressText, { color: darkTheme.textSecondary }]}>
+          {Math.round((agentData.monthlyProgress || 0) * 100)}% of monthly goal (₹{agentData.monthlyGoal || 0})
         </Text>
+      </Card.Content>
+    </Card>
+  );
+
+  const renderPendingRequests = () => (
+    <View>
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: darkTheme.text }]}>Pending Requests</Text>
+        <Chip 
+          textStyle={{ color: darkTheme.text }}
+          style={{ backgroundColor: darkTheme.accent }}
+        >
+          {pendingRequests.length} new
+        </Chip>
       </View>
-      <Text variant="headlineMedium">Agent Home</Text>
-      {status === 'offline' && (
-        <Button mode="outlined" onPress={() => { setStatus('online'); setShowBanner(false); }} style={{ marginTop: 16 }}>
-          Go Online
-        </Button>
-      )}
+      
+      {pendingRequests.map((request) => (
+        <Card key={request.id} style={[styles.requestCard, { backgroundColor: darkTheme.surface }]}>
+          <Card.Content>
+            <View style={styles.requestHeader}>
+              <View style={styles.requestInfo}>
+                <Text style={[styles.serviceName, { color: darkTheme.text }]}>{request.service}</Text>
+                {request.urgent && (
+                  <Chip 
+                    textStyle={{ color: 'white', fontSize: 10 }}
+                    style={{ backgroundColor: darkTheme.error, height: 20 }}
+                  >
+                    URGENT
+                  </Chip>
+                )}
+              </View>
+              <Text style={[styles.requestAmount, { color: darkTheme.success }]}>₹{request.amount}</Text>
+            </View>
+            
+            <Text style={[styles.customerName, { color: darkTheme.textSecondary }]}>{request.customer}</Text>
+            
+            <View style={styles.requestDetails}>
+              <View style={styles.requestDetailItem}>
+                <MaterialCommunityIcons name="map-marker" size={16} color={darkTheme.textSecondary} />
+                <Text style={[styles.requestDetailText, { color: darkTheme.textSecondary }]}>{request.distance}</Text>
+              </View>
+              <View style={styles.requestDetailItem}>
+                <MaterialCommunityIcons name="clock" size={16} color={darkTheme.textSecondary} />
+                <Text style={[styles.requestDetailText, { color: darkTheme.textSecondary }]}>{request.time}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.requestActions}>
+              <Button 
+                mode="outlined" 
+                onPress={() => rejectBooking(request.id)}
+                style={styles.rejectButton}
+                textColor={darkTheme.error}
+              >
+                Decline
+              </Button>
+              <Button 
+                mode="contained" 
+                onPress={() => acceptBooking(request.id)}
+                style={[styles.acceptButton, { backgroundColor: darkTheme.success }]}
+              >
+                Accept
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+      ))}
+    </View>
+  );
+
+  const renderQuickActions = () => (
+    <View style={styles.quickActionsContainer}>
+      <Text style={[styles.sectionTitle, { color: darkTheme.text }]}>Quick Actions</Text>
+      
+      <View style={styles.quickActionsGrid}>
+        <TouchableOpacity style={[styles.quickAction, { backgroundColor: darkTheme.surface }]}>
+          <MaterialCommunityIcons name="history" size={24} color={darkTheme.primary} />
+          <Text style={[styles.quickActionText, { color: darkTheme.text }]}>Booking History</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.quickAction, { backgroundColor: darkTheme.surface }]}>
+          <MaterialCommunityIcons name="account-edit" size={24} color={darkTheme.secondary} />
+          <Text style={[styles.quickActionText, { color: darkTheme.text }]}>Edit Profile</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.quickAction, { backgroundColor: darkTheme.surface }]}>
+          <MaterialCommunityIcons name="chart-line" size={24} color={darkTheme.accent} />
+          <Text style={[styles.quickActionText, { color: darkTheme.text }]}>Analytics</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.quickAction, { backgroundColor: darkTheme.surface }]}>
+          <MaterialCommunityIcons name="help-circle" size={24} color={darkTheme.warning} />
+          <Text style={[styles.quickActionText, { color: darkTheme.text }]}>Support</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderLocationArea = () => (
+    <View style={styles.locationContainer}>
+      <View style={styles.locationContent}>
+        <MaterialCommunityIcons 
+          name="map-marker" 
+          size={16} 
+          color={darkTheme.primary} 
+          style={styles.locationIcon}
+        />
+        <View style={styles.locationInfo}>
+          <Text style={styles.locationTitle}>Current Location</Text>
+          <Text style={styles.locationText}>
+            {currentArea}
+          </Text>
+        </View>
+        <MaterialCommunityIcons 
+          name="refresh" 
+          size={14} 
+          color={darkTheme.textSecondary}
+        />
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={[styles.container, { backgroundColor: darkTheme.background }]}>
+      <StatusBar barStyle="light-content" backgroundColor={darkTheme.gradient[0]} />
+      
+      <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
+        {renderHeader()}
+        {renderLocationArea()}
+        
+        <ScrollView 
+          style={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {renderStatsCards()}
+          {renderEarningsOverview()}
+          {renderPendingRequests()}
+          {renderQuickActions()}
+        </ScrollView>
+      </Animated.View>
+      
+      <FAB
+        icon="plus"
+        style={[styles.fab, { backgroundColor: darkTheme.primary }]}
+        onPress={() => navigation.navigate('CreateService')}
+      />
     </View>
   );
 }
@@ -76,18 +510,305 @@ export default function AgentHomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: darkTheme.background,
   },
-  statusBar: {
-    width: '100%',
-    padding: 8,
-    marginBottom: 16,
+  header: {
+    paddingBottom: 2,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 0,
+  },
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 8,
+  },
+  avatar: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  avatarLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    backgroundColor: 'rgba(255, 215, 0, 0.9)',
+    borderRadius: 8,
+    padding: 1,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  agentName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rating: {
+    fontSize: 12,
+    color: 'white',
+    marginLeft: 3,
+    fontWeight: '600',
+  },
+  ratingCount: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  walletInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  walletBalance: {
+    fontSize: 14,
+    color: darkTheme.earning,
+    marginLeft: 4,
+    fontWeight: 'bold',
+  },
+  onlineToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
     borderRadius: 4,
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 11,
+    color: 'white',
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  switch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
+  },
+  locationContainer: {
+    backgroundColor: darkTheme.surface,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: darkTheme.borderLight,
+  },
+  locationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  locationIcon: {
+    marginRight: 12,
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationTitle: {
+    fontSize: 12,
+    color: darkTheme.textSecondary,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  locationText: {
+    fontSize: 14,
+    color: darkTheme.text,
+    fontWeight: '600',
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    backgroundColor: darkTheme.background,
+    paddingTop: 10,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 0,
+    marginBottom: 20,
+  },
+  statCard: {
+    flex: 1,
+    marginHorizontal: 4,
+    elevation: 6,
+    borderRadius: 16,
+    backgroundColor: darkTheme.surface,
+    borderWidth: 1,
+    borderColor: darkTheme.borderLight,
+  },
+  statContent: {
+    alignItems: 'center',
+    paddingVertical: 18,
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginTop: 8,
+    color: darkTheme.text,
+  },
+  statLabel: {
+    fontSize: 13,
+    marginTop: 4,
+    textAlign: 'center',
+    color: darkTheme.textSecondary,
+    fontWeight: '500',
+  },
+  earningsCard: {
+    marginBottom: 20,
+    elevation: 6,
+    borderRadius: 16,
+    backgroundColor: darkTheme.surface,
+    borderWidth: 1,
+    borderColor: darkTheme.borderLight,
+  },
+  earningsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: darkTheme.text,
+  },
+  earningsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 15,
+  },
+  earningsItem: {
+    alignItems: 'center',
+  },
+  earningsLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  earningsValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  progressBar: {
+    height: 8,
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  progressText: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  requestCard: {
+    marginBottom: 15,
+    elevation: 4,
+    borderRadius: 12,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  requestInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  serviceName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginRight: 10,
+  },
+  requestAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  customerName: {
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  requestDetails: {
+    flexDirection: 'row',
+    marginBottom: 15,
+  },
+  requestDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  requestDetailText: {
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  rejectButton: {
+    flex: 0.45,
+    borderColor: darkTheme.error,
+  },
+  acceptButton: {
+    flex: 0.45,
+  },
+  quickActionsContainer: {
+    marginTop: 20,
+    marginBottom: 100,
+  },
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 15,
+  },
+  quickAction: {
+    width: '48%',
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 15,
+    elevation: 4,
+  },
+  quickActionText: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  fab: {
+    position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 0,
+    elevation: 8,
   },
 });
