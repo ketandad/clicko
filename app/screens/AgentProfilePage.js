@@ -70,8 +70,18 @@ export default function AgentProfileScreen() {
     try {
       setLoading(true);
       const profileData = await getUserProfile(user.id);
-      console.log('📋 AgentProfile: Profile data loaded:', profileData);
-      console.log('📞 AgentProfile: Phone number from API:', profileData.phone);
+      
+      // Check if profileData contains HTML (indicates backend issue)
+      if (typeof profileData === 'string' && profileData.includes('<!doctype html>')) {
+        console.log('📋 AgentProfile: Received HTML response - backend may not be running');
+      } else if (profileData && typeof profileData === 'object') {
+        console.log('📋 AgentProfile: Profile data loaded successfully');
+        console.log('📞 AgentProfile: Phone number from API:', profileData.phone);
+      } else {
+        console.log('📋 AgentProfile: Profile data loaded:', profileData);
+        console.log('📞 AgentProfile: Phone number from API:', profileData?.phone);
+      }
+      
       setProfile(profileData);
       setName(profileData.name || '');
       setEmail(profileData.email || '');

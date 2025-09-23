@@ -3,9 +3,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthProvider } from './contexts/AuthContext';
 import { LocationProvider } from './contexts/LocationContext';
+import BackendStatusBanner from './components/BackendStatusBanner';
 import { theme } from './theme';
 
 export default function App() {
@@ -16,7 +18,10 @@ export default function App() {
           <LocationProvider>
             <NavigationContainer>
               <StatusBar style="auto" />
-              <AppNavigator />
+              <View style={{ flex: 1 }}>
+                <BackendStatusBanner />
+                <AppNavigator />
+              </View>
             </NavigationContainer>
           </LocationProvider>
         </AuthProvider>

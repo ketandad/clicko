@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { checkAgentProfile } from '../services/agentService';
+import { validateStoredToken } from '../utils/tokenValidation';
 
 const AuthContext = createContext();
 
@@ -12,11 +13,60 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const handleTokenExpiration = async () => {
+    try {
+      console.log('🚨 AuthContext: Token expired, logging out user');
+      await logout();
+    } catch (error) {
+      console.error('❌ AuthContext: Error handling token expiration:', error);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      console.log('🚪 AuthContext: Logout called');
+      await SecureStore.deleteItemAsync('userToken');
+      await SecureStore.deleteItemAsync('userId');
+      await SecureStore.deleteItemAsync('userName');
+      await SecureStore.deleteItemAsync('isAgent');
+      await SecureStore.deleteItemAsync('agentOnboardingCompleted');
+      await SecureStore.deleteItemAsync('walletBalance');
+      await SecureStore.deleteItemAsync('currentMode');
+      setUser(null);
+      console.log('✅ AuthContext: Logout complete');
+    } catch (error) {
+      console.error('❌ AuthContext: Error during logout:', error);
+    }
+  };
+
   useEffect(() => {
     // Check if the user is already logged in
     async function loadUserFromStorage() {
       try {
         console.log('🔍 AuthContext: Loading user from storage...');
+        
+        // First validate the stored token (but only clear if actually expired)
+        const tokenValidation = await validateStoredToken();
+        if (!tokenValidation.isValid) {
+          console.log('❌ AuthContext: Token validation failed:', tokenValidation.reason);
+          if (tokenValidation.reason === 'expired') {
+            console.log('⏰ AuthContext: Token expired at:', tokenValidation.expiredAt);
+            console.log('🧹 AuthContext: Clearing expired token and requiring re-login');
+            await handleTokenExpiration();
+          } else if (tokenValidation.reason === 'no_token') {
+            console.log('🔍 AuthContext: No token found - user needs to log in');
+          } else {
+            console.log('⚠️ AuthContext: Token validation error - continuing with stored data');
+            // Don't clear token for validation errors, only for confirmed expiration
+          }
+          
+          // Only return early if token is confirmed expired, not for other validation issues
+          if (tokenValidation.reason === 'expired' || tokenValidation.reason === 'no_token') {
+            return;
+          }
+        }
+        
+        // Get stored user data (even if token validation had issues, let the user stay logged in)
         const token = await SecureStore.getItemAsync('userToken');
         const userId = await SecureStore.getItemAsync('userId');
         const userName = await SecureStore.getItemAsync('userName');
@@ -35,12 +85,51 @@ export function AuthProvider({ children }) {
         });
         
         if (token && userId && userName) {
+          // ALWAYS verify agent onboarding status with backend on app startup
+          // This ensures frontend state matches backend reality regardless of stored values
+          console.log('🔍 AuthContext: Checking backend for agent profile (startup verification)...');
+          let finalAgentOnboardingCompleted = agentOnboardingCompleted;
+          let finalWalletBalance = walletBalance;
+          
+          try {
+            const agentProfile = await checkAgentProfile(parseInt(userId));
+            const hasAgentProfile = agentProfile !== null;
+            
+            console.log('🏦 AuthContext: Backend agent check result:', { hasAgentProfile, agentProfile });
+            
+            if (hasAgentProfile) {
+              // User has agent profile in backend - update frontend state to match
+              console.log('✅ AuthContext: Agent profile found in backend, updating frontend state');
+              finalAgentOnboardingCompleted = true;
+              finalWalletBalance = agentProfile.wallet_balance || walletBalance;
+              await SecureStore.setItemAsync('agentOnboardingCompleted', 'true');
+              await SecureStore.setItemAsync('isAgent', 'true'); // Fix isAgent flag based on actual profile
+              await SecureStore.setItemAsync('walletBalance', finalWalletBalance.toString());
+              
+              if (!agentOnboardingCompleted) {
+                console.log('🔧 AuthContext: Fixed agent identity loss - frontend now matches backend');
+              }
+            } else {
+              // No agent profile in backend - frontend should reflect this
+              if (agentOnboardingCompleted) {
+                console.log('⚠️ AuthContext: Frontend claims agent onboarding completed, but no Agent profile in database');
+                console.log('🔧 AuthContext: Correcting agent onboarding status to false');
+              }
+              finalAgentOnboardingCompleted = false;
+              await SecureStore.setItemAsync('agentOnboardingCompleted', 'false');
+              await SecureStore.setItemAsync('isAgent', 'false'); // Ensure isAgent flag is consistent
+            }
+          } catch (error) {
+            console.error('❌ AuthContext: Error verifying agent profile during startup:', error);
+            console.log('🔧 AuthContext: Continuing with cached values due to verification error');
+          }
+          
           const userData = {
             id: parseInt(userId),
             name: userName,
-            isAgent: currentMode === 'agent', // User can be in agent mode, but capabilities depend on onboarding
-            agentOnboardingCompleted,
-            walletBalance,
+            isAgent: finalAgentOnboardingCompleted, // Use actual agent profile status
+            agentOnboardingCompleted: finalAgentOnboardingCompleted,
+            walletBalance: finalWalletBalance,
             currentMode,
             token
           };
@@ -71,22 +160,28 @@ export function AuthProvider({ children }) {
       console.log('👤 AuthContext: Agent profile check:', { hasAgentProfile, agentProfile });
       
       // Update userData with actual agent status from database
+      const defaultMode = hasAgentProfile ? 'agent' : 'user'; // Default to agent mode if they have agent profile
+      const currentMode = userData.currentMode || defaultMode; // Respect previous choice if available
+      
       const enhancedUserData = {
         ...userData,
+        isAgent: hasAgentProfile, // Set based on actual agent profile existence, not backend response
         agentOnboardingCompleted: hasAgentProfile || userData.agentOnboardingCompleted || false,
         walletBalance: agentProfile?.wallet_balance || userData.walletBalance || 0,
+        currentMode: currentMode
       };
       
       // Store user data in SecureStore
       await SecureStore.setItemAsync('userToken', enhancedUserData.token || '');
       await SecureStore.setItemAsync('userId', (enhancedUserData.id || '').toString());
       await SecureStore.setItemAsync('userName', enhancedUserData.name || '');
-      await SecureStore.setItemAsync('isAgent', (enhancedUserData.isAgent || false).toString());
+      await SecureStore.setItemAsync('isAgent', hasAgentProfile.toString()); // Set based on actual agent profile
       await SecureStore.setItemAsync('agentOnboardingCompleted', (enhancedUserData.agentOnboardingCompleted || false).toString());
       await SecureStore.setItemAsync('walletBalance', (enhancedUserData.walletBalance || 0).toString());
-      await SecureStore.setItemAsync('currentMode', enhancedUserData.currentMode || 'user');
+      await SecureStore.setItemAsync('currentMode', currentMode);
       
       console.log('💾 AuthContext: User data stored successfully');
+      console.log('🔄 AuthContext: User mode set to:', currentMode);
       
       // Update state
       setUser(enhancedUserData);
@@ -97,41 +192,27 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const handleTokenExpiration = async () => {
-    try {
-      console.log('🚨 AuthContext: Token expired, logging out user');
-      await logout();
-    } catch (error) {
-      console.error('❌ AuthContext: Error handling token expiration:', error);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      console.log('🚪 AuthContext: Logout called');
-      await SecureStore.deleteItemAsync('userToken');
-      await SecureStore.deleteItemAsync('userId');
-      await SecureStore.deleteItemAsync('userName');
-      await SecureStore.deleteItemAsync('isAgent');
-      await SecureStore.deleteItemAsync('agentOnboardingCompleted');
-      await SecureStore.deleteItemAsync('walletBalance');
-      await SecureStore.deleteItemAsync('currentMode');
-      setUser(null);
-      console.log('✅ AuthContext: Logout complete');
-    } catch (error) {
-      console.error('❌ AuthContext: Error during logout:', error);
-    }
-  };
-
   const toggleAgentMode = async () => {
     try {
-      const updatedUser = { ...user, isAgent: !user.isAgent };
-      await SecureStore.setItemAsync('isAgent', updatedUser.isAgent.toString());
-      await SecureStore.setItemAsync('currentMode', updatedUser.isAgent ? 'agent' : 'user');
+      // Only allow mode switching if user has completed agent onboarding
+      if (!user.agentOnboardingCompleted) {
+        console.log('❌ AuthContext: Cannot switch to agent mode - no agent profile found');
+        return false;
+      }
+
+      const newMode = user.currentMode === 'agent' ? 'user' : 'agent';
+      const updatedUser = { 
+        ...user, 
+        currentMode: newMode
+      };
+      
+      await SecureStore.setItemAsync('currentMode', newMode);
       setUser(updatedUser);
-      console.log('🔄 AuthContext: Mode toggled to:', updatedUser.isAgent ? 'agent' : 'user');
+      console.log('🔄 AuthContext: Mode toggled to:', newMode);
+      return true;
     } catch (error) {
       console.error('Error toggling agent mode:', error);
+      return false;
     }
   };
 

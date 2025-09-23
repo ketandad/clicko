@@ -38,16 +38,17 @@ function HomeStackScreen() {
   });
   
   // If user is in agent mode but hasn't completed onboarding, show onboarding
-  const shouldShowOnboarding = user?.isAgent && !user?.agentOnboardingCompleted;
+  const shouldShowOnboarding = user?.currentMode === 'agent' && !user?.agentOnboardingCompleted;
   const initialRoute = shouldShowOnboarding ? 'AgentOnboarding' : 'HomeMain';
   
   console.log('🏠 HomeStackScreen: Initial route:', initialRoute);
+  console.log('🏠 HomeStackScreen: User mode:', user?.currentMode, 'Has agent profile:', user?.agentOnboardingCompleted);
   
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
       <HomeStack.Screen 
         name="HomeMain" 
-        component={user?.isAgent ? AgentHomeScreen : HomeScreen} 
+        component={user?.currentMode === 'agent' ? AgentHomeScreen : HomeScreen} 
       />
       <HomeStack.Screen name="AgentList" component={AgentListScreen} />
       <HomeStack.Screen name="AgentProfile" component={AgentProfileScreen} />
@@ -67,7 +68,7 @@ function ProfileStackScreen() {
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen 
         name="ProfileMain" 
-        component={user?.isAgent ? AgentProfilePage : CustomerProfilePage} 
+        component={user?.currentMode === 'agent' ? AgentProfilePage : CustomerProfilePage} 
       />
       <ProfileStack.Screen name="AgentOnboarding" component={AgentOnboardingScreen} />
     </ProfileStack.Navigator>
@@ -90,10 +91,10 @@ function MainTabNavigator() {
         name="Home" 
         component={HomeStackScreen}
         options={{
-          tabBarLabel: user?.isAgent ? 'Dashboard' : 'Home',
+          tabBarLabel: user?.currentMode === 'agent' ? 'Dashboard' : 'Home',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons 
-              name={user?.isAgent ? "view-dashboard" : "home"} 
+              name={user?.currentMode === 'agent' ? "view-dashboard" : "home"} 
               color={color} 
               size={size} 
             />

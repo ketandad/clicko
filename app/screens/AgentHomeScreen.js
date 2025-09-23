@@ -181,8 +181,13 @@ export default function AgentHomeScreen() {
           setCurrentArea(displayArea);
           console.log('🏘️ Current area:', displayArea);
           
-          // Send location update to backend
-          updateAgentLocation(coords.latitude, coords.longitude, displayArea);
+          // Send location update to backend only if user is an agent
+          if (user?.isAgent || user?.agentOnboardingCompleted) {
+            console.log('📍 AgentHome: User is an agent, updating location');
+            updateAgentLocation(coords.latitude, coords.longitude, displayArea);
+          } else {
+            console.log('👤 AgentHome: User is not an agent, skipping location update');
+          }
         } else {
           setCurrentArea('Area unavailable');
         }

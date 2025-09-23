@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import config from '../config';
+import { checkApiHealth } from '../utils/apiHealthCheck';
 
 const api = axios.create({
   baseURL: config.API_URL,
@@ -28,13 +29,45 @@ api.interceptors.request.use(
   }
 );
 
-// Add response interceptor to handle token expiration
+// Add response interceptor to handle token expiration and HTML responses
 api.interceptors.response.use(
   response => {
+    // Check if response data is HTML (indicates backend not running)
+    if (typeof response.data === 'string' && 
+        (response.data.trim().startsWith('<') || response.data.includes('<!doctype html>'))) {
+      console.warn('⚠️ UserService: Received HTML instead of JSON - backend may not be running');
+      
+      // Check API health
+      checkApiHealth().then(health => {
+        if (!health.isHealthy) {
+          console.error('🚨 UserService: Backend health check failed:', health.error);
+          console.log('💡 UserService: Recommendation:', health.recommendation);
+        }
+      }).catch(err => {
+        console.error('❌ UserService: Health check error:', err);
+      });
+      
+      // Create a custom error for HTML responses
+      const htmlError = new Error('Backend server is not responding (received HTML instead of JSON)');
+      htmlError.isHtmlResponse = true;
+      htmlError.originalData = response.data;
+      return Promise.reject(htmlError);
+    }
+    
     return response;
   },
   async error => {
     const originalRequest = error.config;
+    
+    // Handle HTML responses in error cases
+    if (error.response && typeof error.response.data === 'string' && 
+        (error.response.data.trim().startsWith('<') || error.response.data.includes('<!doctype html>'))) {
+      console.warn('⚠️ UserService: Error response is HTML - backend may not be running');
+      const htmlError = new Error('Backend server is not responding properly');
+      htmlError.isHtmlResponse = true;
+      htmlError.originalError = error;
+      return Promise.reject(htmlError);
+    }
     
     if (error.response?.status === 401 && !originalRequest._retry) {
       console.log('🚨 UserService: 401 Unauthorized - Token expired or invalid');
@@ -74,6 +107,20 @@ export const getUserProfile = async (userId) => {
     const response = await api.get(`/users/${userId}/`);
     return response.data;
   } catch (error) {
+    // Handle HTML response errors gracefully
+    if (error.isHtmlResponse) {
+      console.error('❌ UserService: Backend not responding properly (HTML response)');
+      // Return a basic user profile structure so the app doesn't crash
+      return {
+        id: userId,
+        name: 'User',
+        email: '',
+        phone: '',
+        address: '',
+        error: 'Backend server not available'
+      };
+    }
+    
     console.error('Error fetching user profile:', error.response?.data || error.message);
     throw error;
   }

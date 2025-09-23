@@ -208,7 +208,7 @@ export default function UserProfileScreen({ navigation }) {
 
   const handleAgentModeToggle = async () => {
     try {
-      if (!user?.isAgent) {
+      if (user?.currentMode !== 'agent') {
         // Switching to agent mode
         if (user?.agentOnboardingCompleted) {
           // Already onboarded - just switch mode
@@ -330,7 +330,7 @@ export default function UserProfileScreen({ navigation }) {
             <View style={styles.userInfo}>
               <Text style={styles.userName}>{profile.name || 'Name not available'}</Text>
               <Text style={styles.userEmail}>{profile.email || 'Email not available'}</Text>
-              {user?.isAgent && user?.walletBalance !== undefined && (
+              {user?.currentMode === 'agent' && user?.walletBalance !== undefined && (
                 <View style={styles.walletInfo}>
                   <Icon name="wallet" size={20} color={colors.primary} />
                   <Text style={styles.walletBalance}>₹{user.walletBalance}</Text>
@@ -426,7 +426,7 @@ export default function UserProfileScreen({ navigation }) {
 
               <Divider style={styles.divider} />
 
-              {user?.isAgent && user?.agentOnboardingCompleted && (
+              {user?.currentMode === 'agent' && user?.agentOnboardingCompleted && (
                 <>
                   <View style={styles.agentSection}>
                     <Text style={styles.sectionTitle}>Agent Dashboard</Text>
@@ -447,7 +447,7 @@ export default function UserProfileScreen({ navigation }) {
                 </>
               )}
 
-              {!user?.isAgent && (
+              {user?.currentMode === 'user' && (
                 <>
                   <View style={styles.customerSection}>
                     <Text style={styles.sectionTitle}>Your Activity</Text>
@@ -486,26 +486,26 @@ export default function UserProfileScreen({ navigation }) {
                 <Text style={styles.sectionTitle}>Service Provider Mode</Text>
                 <View style={styles.infoRow}>
                   <Icon 
-                    name={user?.isAgent ? "account-tie" : "account"} 
+                    name={user?.currentMode === 'agent' ? "account-tie" : "account"} 
                     size={20} 
-                    color={user?.isAgent ? colors.primary : colors.textSecondary} 
+                    color={user?.currentMode === 'agent' ? colors.primary : colors.textSecondary} 
                   />
                   <View style={styles.agentModeInfo}>
                     <Text style={styles.infoText}>
-                      {user?.isAgent ? 'Agent Mode: Active' : 'Customer Mode: Active'}
+                      {user?.currentMode === 'agent' ? 'Agent Mode: Active' : 'Customer Mode: Active'}
                     </Text>
                     <Text style={styles.agentModeSubtext}>
                       {user?.agentOnboardingCompleted 
-                        ? (user?.isAgent ? 'You can receive service requests' : 'Switch to agent mode to provide services')
+                        ? (user?.currentMode === 'agent' ? 'You can receive service requests' : 'Switch to agent mode to provide services')
                         : 'Complete onboarding to become an agent'
                       }
                     </Text>
                   </View>
                   {user?.agentOnboardingCompleted ? (
                     <Switch
-                      value={user?.isAgent || false}
+                      value={user?.currentMode === 'agent' || false}
                       onValueChange={() => {
-                        if (user?.isAgent) {
+                        if (user?.currentMode === 'agent') {
                           setCurrentMode('user');
                         } else {
                           setCurrentMode('agent');
