@@ -7,6 +7,7 @@ from shared.admin.routes import router as admin_router
 from shared.category.routes import router as category_router
 from shared.agent.routes import router as agent_router
 from shared.rating.routes import router as rating_router
+from shared.booking.routes import router as booking_router
 from shared.database import engine, Base
 # Import models so they register with Base
 from shared.user.models import User, Agent, Category, AgentCategory, Booking, Rating
@@ -68,6 +69,7 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(category_router, prefix="/api")
 app.include_router(agent_router, prefix="/api")
 app.include_router(rating_router, prefix="/api")
+app.include_router(booking_router)
 
 @app.get("/")
 async def root():
