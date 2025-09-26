@@ -28,6 +28,8 @@ import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { useAuth } from '../contexts/AuthContext';
 import { updateAgentStatus, getAgentStats, updateAgentLocation } from '../services/agentService';
+import { notificationService } from '../services/notificationService';
+import { notificationTestService } from '../services/notificationTestService';
 
 const { width } = Dimensions.get('window');
 
@@ -91,10 +93,19 @@ export default function AgentHomeScreen() {
 
   // Remove dummy pending requests - will be replaced with real data
   const [pendingRequests, setPendingRequests] = useState([]);
+  
+  // WebSocket connection for real-time notifications
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = React.useRef(null);
 
   useEffect(() => {
     StatusBar.setBarStyle('light-content');
     loadAgentData();
+    
+    // Connect to notifications if agent is online
+    if (isOnline && user?.id) {
+      connectToNotifications();
+    }
     
     // Update agent data with real user info
     if (user) {
@@ -214,6 +225,7 @@ export default function AgentHomeScreen() {
     // Cleanup interval on component unmount
     return () => {
       clearInterval(locationInterval);
+      disconnectFromNotifications();
       console.log('🛑 Location auto-update stopped');
     };
   }, []);
@@ -228,6 +240,14 @@ export default function AgentHomeScreen() {
       
       // Update local state only after successful API call
       setIsOnline(newStatus);
+      
+      // Connect/disconnect WebSocket based on status
+      if (newStatus && user?.id) {
+        connectToNotifications();
+      } else {
+        disconnectFromNotifications();
+      }
+      
       console.log('✅ Agent status updated successfully:', newStatus ? 'Online' : 'Offline');
     } catch (error) {
       console.error('❌ Error updating agent status:', error);
@@ -235,6 +255,128 @@ export default function AgentHomeScreen() {
       Alert.alert(
         'Status Update Failed',
         'Could not update your online status. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const connectToNotifications = () => {
+    if (!user?.id) return;
+
+    // Add listener for notification events
+    const removeListener = notificationService.addListener((event, data) => {
+      switch (event) {
+        case 'connected':
+          setWsConnected(true);
+          notificationService.startHeartbeat();
+          break;
+          
+        case 'disconnected':
+          setWsConnected(false);
+          notificationService.stopHeartbeat();
+          break;
+          
+        case 'booking_request':
+          console.log('🔔 New booking request received');
+          
+          // Update pending bookings count
+          setAgentData(prev => ({
+            ...prev,
+            pendingBookings: prev.pendingBookings + 1
+          }));
+          
+          // Navigate to notification screen immediately for bell notification
+          navigation.navigate('AgentNotifications', { 
+            agentId: user?.id, 
+            authToken: user?.token 
+          });
+          break;
+          
+        case 'response_confirmed':
+          console.log('✅ Response confirmed');
+          loadAgentData(); // Refresh data
+          break;
+          
+        case 'status_update':
+          console.log('📢 Booking status update');
+          loadAgentData(); // Refresh data
+          break;
+          
+        case 'system_message':
+          Alert.alert('System Message', data.message);
+          break;
+          
+        case 'error':
+          console.error('🚨 Notification error:', data);
+          break;
+          
+        default:
+          console.log('Unknown notification event:', event);
+      }
+    });
+
+    // Store listener cleanup function
+    wsRef.current = removeListener;
+    
+    // Connect to notification service
+    notificationService.connect(user.id, user.token);
+  };
+
+  const disconnectFromNotifications = () => {
+    // Remove listener
+    if (wsRef.current) {
+      wsRef.current(); // Call cleanup function
+      wsRef.current = null;
+    }
+    
+    // Disconnect from notification service
+    notificationService.disconnect();
+    setWsConnected(false);
+  };
+
+  const testNotification = async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'User ID not available for testing');
+      return;
+    }
+
+    try {
+      console.log('🧪 Testing notification system...');
+      
+      // Check if backend is available
+      const backendAvailable = await notificationTestService.checkBackendConnection();
+      
+      if (!backendAvailable) {
+        Alert.alert(
+          'Backend Not Available',
+          'The backend server is not running. Please start the backend to test notifications.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Send test notification
+      await notificationTestService.simulateBookingNotification(user.id);
+      
+      Alert.alert(
+        'Test Notification Sent',
+        'A test booking notification has been sent! If you\'re connected to WebSocket, you should receive it shortly.',
+        [
+          {
+            text: 'View Notifications',
+            onPress: () => navigation.navigate('AgentNotifications', { 
+              agentId: user?.id, 
+              authToken: user?.token 
+            })
+          },
+          { text: 'OK' }
+        ]
+      );
+      
+    } catch (error) {
+      Alert.alert(
+        'Test Failed',
+        `Failed to send test notification: ${error.message}`,
         [{ text: 'OK' }]
       );
     }
@@ -283,19 +425,49 @@ export default function AgentHomeScreen() {
               </View>
             </View>
           </View>
-          
-          <View style={styles.onlineToggle}>
-            <View style={[styles.statusIndicator, { backgroundColor: isOnline ? darkTheme.success : darkTheme.error }]} />
-            <Text style={styles.statusText}>
-              {isOnline ? 'Online' : 'Offline'}
-            </Text>
-            <Switch
-              value={isOnline}
-              onValueChange={toggleOnlineStatus}
-              trackColor={{ false: '#424242', true: darkTheme.success }}
-              thumbColor={isOnline ? '#FFFFFF' : '#BDBDBD'}
-              style={styles.switch}
-            />
+
+          <View style={styles.headerActions}>
+            {/* Notification Bell */}
+            <TouchableOpacity 
+              style={styles.notificationButton}
+              onPress={() => navigation.navigate('AgentNotifications', { 
+                agentId: user?.id, 
+                authToken: user?.token 
+              })}
+            >
+              <MaterialCommunityIcons 
+                name={agentData.pendingBookings > 0 ? "bell-ring" : "bell"} 
+                size={24} 
+                color={agentData.pendingBookings > 0 ? darkTheme.warning : darkTheme.text} 
+              />
+              {/* Connection indicator dot */}
+              <View style={[
+                styles.connectionDot, 
+                { backgroundColor: wsConnected ? darkTheme.success : darkTheme.error }
+              ]} />
+              {agentData.pendingBookings > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {agentData.pendingBookings > 9 ? '9+' : agentData.pendingBookings}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            
+            {/* Online/Offline Toggle */}
+            <View style={styles.onlineToggle}>
+              <View style={[styles.statusIndicator, { backgroundColor: isOnline ? darkTheme.success : darkTheme.error }]} />
+              <Text style={styles.statusText}>
+                {isOnline ? 'Online' : 'Offline'}
+              </Text>
+              <Switch
+                value={isOnline}
+                onValueChange={toggleOnlineStatus}
+                trackColor={{ false: '#424242', true: darkTheme.success }}
+                thumbColor={isOnline ? '#FFFFFF' : '#BDBDBD'}
+                style={styles.switch}
+              />
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -453,6 +625,37 @@ export default function AgentHomeScreen() {
           <MaterialCommunityIcons name="help-circle" size={24} color={darkTheme.warning} />
           <Text style={[styles.quickActionText, { color: darkTheme.text }]}>Support</Text>
         </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.quickAction, { backgroundColor: darkTheme.surface }]}
+          onPress={() => navigation.navigate('AgentNotifications', { 
+            agentId: user?.id, 
+            authToken: user?.token 
+          })}
+        >
+          <MaterialCommunityIcons 
+            name="bell-ring" 
+            size={24} 
+            color={wsConnected ? darkTheme.success : darkTheme.error} 
+          />
+          <Text style={[styles.quickActionText, { color: darkTheme.text }]}>
+            Notifications {agentData.pendingBookings > 0 ? `(${agentData.pendingBookings})` : ''}
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.quickAction, { backgroundColor: darkTheme.accent, opacity: 0.8 }]}
+          onPress={testNotification}
+        >
+          <MaterialCommunityIcons 
+            name="bell-ring-outline" 
+            size={24} 
+            color="white" 
+          />
+          <Text style={[styles.quickActionText, { color: 'white', fontSize: 12 }]}>
+            Test Notification
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -477,6 +680,22 @@ export default function AgentHomeScreen() {
           size={14} 
           color={darkTheme.textSecondary}
         />
+      </View>
+      
+      {/* Notification Status Indicator */}
+      <View style={styles.notificationStatus}>
+        <View style={[
+          styles.notificationStatusDot, 
+          { backgroundColor: wsConnected ? darkTheme.success : darkTheme.error }
+        ]} />
+        <Text style={styles.notificationStatusText}>
+          {wsConnected ? 'Notifications Active' : 'Notifications Offline'}
+        </Text>
+        {agentData.pendingBookings > 0 && (
+          <Text style={[styles.notificationStatusText, { color: darkTheme.warning }]}>
+            • {agentData.pendingBookings} pending
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -593,6 +812,43 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: 'bold',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  notificationButton: {
+    position: 'relative',
+    padding: 8,
+    marginRight: 16,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: darkTheme.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  notificationBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  connectionDot: {
+    position: 'absolute',
+    bottom: 2,
+    left: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'white',
+  },
   onlineToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -626,6 +882,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  notificationStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: darkTheme.border,
+  },
+  notificationStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  notificationStatusText: {
+    fontSize: 12,
+    color: darkTheme.textTertiary,
+    marginRight: 8,
   },
   locationIcon: {
     marginRight: 12,
