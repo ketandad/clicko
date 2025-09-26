@@ -83,7 +83,12 @@ const AgentDetailScreen = ({ route, navigation }) => {
   };
 
   const handleBookService = () => {
-    navigation.navigate('BookingEstimate', { agent });
+    // Navigate to comprehensive booking confirmation flow
+    navigation.navigate('BookingConfirmation', { 
+      agent,
+      selectedCategory: agent.categories?.[0] || 'General Service',
+      selectedSubcategory: null
+    });
   };
 
   const handleCallAgent = () => {
