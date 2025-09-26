@@ -20,6 +20,7 @@ import SupportScreen from '../screens/SupportScreen';
 import LocationScreen from '../screens/LocationScreen';
 import AgentOnboardingScreen from '../screens/AgentOnboardingScreen';
 import AgentDiscoveryScreen from '../screens/AgentDiscoveryScreen';
+import AgentDetailScreen from '../screens/AgentDetailScreen';
 import BookingEstimateScreen from '../screens/BookingEstimateScreen';
 import TermsOfServiceScreen from '../screens/TermsOfServiceScreen';
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
@@ -63,6 +64,7 @@ function HomeStackScreen() {
       <HomeStack.Screen name="AgentList" component={AgentListScreen} />
       <HomeStack.Screen name="AgentDiscovery" component={AgentDiscoveryScreen} />
       <HomeStack.Screen name="AgentProfile" component={AgentProfileScreen} />
+      <HomeStack.Screen name="AgentDetail" component={AgentDetailScreen} />
       <HomeStack.Screen name="Booking" component={BookingScreen} />
       <HomeStack.Screen name="BookingEstimate" component={BookingEstimateScreen} />
       <HomeStack.Screen name="BookingHistory" component={BookingHistoryScreen} />

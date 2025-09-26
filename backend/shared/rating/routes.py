@@ -11,7 +11,7 @@ from datetime import datetime
 import json
 
 from ..database import get_db
-from ..auth.routes import get_current_user
+from ..auth.jwt import get_current_user
 from ..user.models import User, Agent
 
 router = APIRouter(prefix="/ratings", tags=["ratings"])

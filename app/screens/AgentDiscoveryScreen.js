@@ -172,7 +172,7 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
   }, [loadNearbyAgents]);
 
   const handleAgentPress = useCallback((agent) => {
-    navigation.navigate('AgentProfile', { agent });
+    navigation.navigate('AgentDetail', { agent });
   }, [navigation]);
 
   const handleBookAgent = useCallback((agent) => {
