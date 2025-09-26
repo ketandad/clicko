@@ -1,0 +1,39 @@
+# Python cache files
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database files
+*.db
+*.sqlite3
+clicko.db
+clicko_dev.db
+
+# Log files
+*.log
+backend/backend.log
+
+# Upload directories
+backend/uploads/
+uploads/
+
+# Node modules and package-lock (if needed)
+# node_modules/
+# package-lock.json
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
