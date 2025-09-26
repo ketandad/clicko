@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from shared.user.routes import router as user_router
+from shared.category.routes import router as category_router
 from shared.auth.routes import router as auth_router
 from shared.admin.routes import router as admin_router
-from shared.category.routes import router as category_router
+from shared.notifications.routes import router as notifications_router
 from shared.agent.routes import router as agent_router
 from shared.rating.routes import router as rating_router
 from shared.booking.routes import router as booking_router
@@ -18,11 +19,21 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="ClickO API",
-    description="Service marketplace API",
-    version="1.0.0"
-)
+app = FastAPI(title="Clicko Service Platform API", version="1.0.0")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize background tasks on startup"""
+    from shared.notifications.websocket_manager import start_notification_cleanup
+    start_notification_cleanup()
+    print("🔔 Notification system initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up background tasks on shutdown"""
+    from shared.notifications.websocket_manager import stop_notification_cleanup
+    stop_notification_cleanup()
+    print("🔔 Notification system stopped")
 
 # Configure CORS with optimized settings
 app.add_middleware(
@@ -63,10 +74,11 @@ async def shutdown_event():
     logger.info("✅ ClickO API shutdown complete")
 
 # Include routers
-app.include_router(auth_router, prefix="/api")
-app.include_router(user_router, prefix="/api")
-app.include_router(admin_router, prefix="/api")
-app.include_router(category_router, prefix="/api")
+app.include_router(user_router, prefix="/api", tags=["users"])
+app.include_router(category_router, prefix="/api", tags=["categories"])
+app.include_router(auth_router, prefix="/api", tags=["auth"])
+app.include_router(admin_router, prefix="/api", tags=["admin"])
+app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(agent_router, prefix="/api")
 app.include_router(rating_router, prefix="/api")
 app.include_router(booking_router)

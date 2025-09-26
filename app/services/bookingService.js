@@ -40,6 +40,14 @@ class BookingService {
                 agent_id: bookingData.agent_id,
             }));
 
+            // Send bell notification to agent
+            try {
+                await this.sendAgentNotification(result.booking_uuid, bookingData);
+            } catch (notificationError) {
+                console.warn('Failed to send agent notification:', notificationError);
+                // Don't fail the booking if notification fails
+            }
+
             return result;
         } catch (error) {
             console.error('Create booking error:', error);
@@ -90,6 +98,86 @@ class BookingService {
             return result;
         } catch (error) {
             console.error('Update booking status error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send bell notification to agent for new booking
+     * Agent gets continuous bell notification until they accept/reject (30-second timeout)
+     */
+    async sendAgentNotification(bookingId, bookingData) {
+        try {
+            const token = await AsyncStorage.getItem('authToken');
+            
+            // Prepare notification data for agent
+            const notificationData = {
+                booking_id: bookingId,
+                agent_id: bookingData.agent_id,
+                customer_name: bookingData.customer_name,
+                customer_phone: bookingData.customer_phone,
+                service_type: bookingData.service_type,
+                service_details: bookingData.service_details,
+                location: {
+                    latitude: bookingData.location?.latitude,
+                    longitude: bookingData.location?.longitude
+                },
+                address: bookingData.address,
+                scheduled_time: bookingData.scheduled_time,
+                estimated_cost: bookingData.total_cost,
+                visit_charges: bookingData.visit_charges,
+                service_charges: bookingData.service_charges,
+                emergency: bookingData.emergency || false,
+                customer_notes: bookingData.notes
+            };
+
+            const response = await fetch(`${API_BASE_URL}/api/notifications/send-booking-notification`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify(notificationData),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to send agent notification');
+            }
+
+            const result = await response.json();
+            console.log('🔔 Bell notification sent to agent:', result);
+            
+            return result;
+        } catch (error) {
+            console.error('Send agent notification error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get agent connection status (whether they can receive notifications)
+     */
+    async getAgentConnectionStatus(agentId) {
+        try {
+            const token = await AsyncStorage.getItem('authToken');
+            
+            const response = await fetch(`${API_BASE_URL}/api/notifications/agent/${agentId}/connection-status`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to get agent status');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Get agent connection status error:', error);
             throw error;
         }
     }

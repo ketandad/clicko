@@ -9,7 +9,9 @@ import UserProfileScreen from '../screens/UserProfileScreen';
 import HomeScreen from '../screens/HomeScreen';
 import AgentHomeScreen from '../screens/AgentHomeScreen';
 import AgentListScreen from '../screens/AgentListScreen';
+import AgentKYCUploadScreen from '../screens/AgentKYCUploadScreen';
 import AgentProfileScreen from '../screens/AgentProfileScreen';
+import AgentNotificationScreen from '../screens/AgentNotificationScreen';
 import BookingScreen from '../screens/BookingScreen';
 import BookingHistoryScreen from '../screens/BookingHistoryScreen';
 import MyBookingsScreen from '../screens/MyBookingsScreen';
@@ -71,6 +73,11 @@ function HomeStackScreen() {
       <HomeStack.Screen name="BookingConfirmation" component={BookingConfirmationScreen} />
       <HomeStack.Screen name="BookingHistory" component={BookingHistoryScreen} />
       <HomeStack.Screen name="AgentOnboarding" component={AgentOnboardingScreen} />
+      <HomeStack.Screen 
+        name="AgentNotifications" 
+        component={AgentNotificationScreen} 
+        options={{ headerShown: true, title: 'Booking Notifications' }}
+      />
     </HomeStack.Navigator>
   );
 }
