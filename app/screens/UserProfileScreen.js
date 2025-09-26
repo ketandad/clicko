@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 're
 import { Text, Button, TextInput, Divider, ActivityIndicator, Appbar, Switch, Avatar } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
-import { getUserProfile, updateUserProfile, updateUserAddress, getCurrentUser } from '../services/userService';
+import { getUserProfile, updateUserProfile, getCurrentUser } from '../services/userService';
 import { getAgentStats } from '../services/agentService';
 import { colors } from '../theme';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -18,7 +18,6 @@ export default function UserProfileScreen({ navigation }) {
   // Form state
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
   const [email, setEmail] = useState('');
   const [profileImage, setProfileImage] = useState(null);
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -71,12 +70,12 @@ export default function UserProfileScreen({ navigation }) {
       
       setProfile(userProfile);
       
-      // Set form fields
+      // Set form fields (User model only has basic fields)
       setName(userProfile.name || '');
       setEmail(userProfile.email || '');
       setPhone(userProfile.phone || '');
-      setAddress(userProfile.address || '');
-      setProfileImage(userProfile.profile_image_url || null);
+      // Profile image is only available for agents, not regular users
+      setProfileImage(null); // Users don't have profile images in the new schema
       setEmailNotifications(userProfile.email_notifications !== false);
       setPushNotifications(userProfile.push_notifications !== false);
     } catch (error) {
@@ -151,11 +150,7 @@ export default function UserProfileScreen({ navigation }) {
         push_notifications: pushNotifications,
       };
 
-      // Only update address if it has changed
-      if (address !== (profile?.address || '')) {
-        await updateUserAddress(user.id, address);
-      }
-
+      // Note: Address updates are not supported for regular users (only for agents)
       const result = await updateUserProfile(user.id, updatedProfile);
       setProfile({ ...profile, ...result });
       setEditMode(false);
@@ -367,14 +362,7 @@ export default function UserProfileScreen({ navigation }) {
                 style={styles.input}
                 keyboardType="phone-pad"
               />
-              <TextInput
-                label="Address"
-                value={address}
-                onChangeText={setAddress}
-                mode="outlined"
-                style={styles.input}
-                multiline
-              />
+              {/* Note: Address is only available for agents, not regular users */}
 
               <View style={styles.notificationSection}>
                 <Text style={styles.sectionTitle}>Notifications</Text>
@@ -418,10 +406,7 @@ export default function UserProfileScreen({ navigation }) {
                   <Icon name="email" size={20} color={colors.textSecondary} />
                   <Text style={styles.infoText}>{profile?.email || 'No email available'}</Text>
                 </View>
-                <View style={styles.infoRow}>
-                  <Icon name="map-marker" size={20} color={colors.textSecondary} />
-                  <Text style={styles.infoText}>{profile?.address || 'No address added'}</Text>
-                </View>
+                {/* Note: Address is only available for agents, not regular users */}
               </View>
 
               <Divider style={styles.divider} />
@@ -459,10 +444,7 @@ export default function UserProfileScreen({ navigation }) {
                       <Icon name="heart" size={20} color={colors.primary} />
                       <Text style={styles.infoText}>Favorite Services: {agentStats.favoriteServices}</Text>
                     </View>
-                    <View style={styles.infoRow}>
-                      <Icon name="map-marker" size={20} color={colors.primary} />
-                      <Text style={styles.infoText}>Preferred Area: {profile?.address || 'Not set'}</Text>
-                    </View>
+                    {/* Note: Address is managed separately for agents via agent profile */}
                   </View>
                   <Divider style={styles.divider} />
                 </>

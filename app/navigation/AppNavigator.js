@@ -12,7 +12,15 @@ import AgentListScreen from '../screens/AgentListScreen';
 import AgentProfileScreen from '../screens/AgentProfileScreen';
 import BookingScreen from '../screens/BookingScreen';
 import BookingHistoryScreen from '../screens/BookingHistoryScreen';
+import MyBookingsScreen from '../screens/MyBookingsScreen';
+import AgentScheduleScreen from '../screens/AgentScheduleScreen';
+import AgentPricingScreen from '../screens/AgentPricingScreen';
+import AgentServiceCRUD from '../screens/AgentServiceCRUDSimple';
+import SupportScreen from '../screens/SupportScreen';
+import LocationScreen from '../screens/LocationScreen';
 import AgentOnboardingScreen from '../screens/AgentOnboardingScreen';
+import TermsOfServiceScreen from '../screens/TermsOfServiceScreen';
+import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import SplashScreen from '../components/SplashScreen';
@@ -71,13 +79,30 @@ function ProfileStackScreen() {
         component={user?.currentMode === 'agent' ? AgentProfilePage : CustomerProfilePage} 
       />
       <ProfileStack.Screen name="AgentOnboarding" component={AgentOnboardingScreen} />
+      <ProfileStack.Screen name="AgentPricing" component={AgentPricingScreen} />
+      <ProfileStack.Screen name="AgentServiceCRUD" component={AgentServiceCRUD} />
+      <ProfileStack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+      <ProfileStack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
     </ProfileStack.Navigator>
+  );
+}
+
+// Support stack  
+const SupportStack = createStackNavigator();
+function SupportStackScreen() {
+  return (
+    <SupportStack.Navigator screenOptions={{ headerShown: false }}>
+      <SupportStack.Screen name="SupportMain" component={SupportScreen} />
+      <SupportStack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+      <SupportStack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+    </SupportStack.Navigator>
   );
 }
 
 // Main tab navigator
 function MainTabNavigator() {
   const { user } = useAuth();
+  const isAgent = user?.currentMode === 'agent';
   
   return (
     <Tab.Navigator
@@ -91,13 +116,56 @@ function MainTabNavigator() {
         name="Home" 
         component={HomeStackScreen}
         options={{
-          tabBarLabel: user?.currentMode === 'agent' ? 'Dashboard' : 'Home',
+          tabBarLabel: isAgent ? 'Dashboard' : 'Home',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons 
-              name={user?.currentMode === 'agent' ? "view-dashboard" : "home"} 
+              name={isAgent ? "view-dashboard" : "home"} 
               color={color} 
               size={size} 
             />
+          ),
+        }}
+      />
+      <Tab.Screen 
+        name="Bookings" 
+        component={isAgent ? BookingHistoryScreen : MyBookingsScreen}
+        options={{
+          tabBarLabel: isAgent ? 'History' : 'Bookings',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="history" color={color} size={size} />
+          ),
+        }}
+      />
+      {isAgent ? (
+        <Tab.Screen 
+          name="Schedule" 
+          component={AgentScheduleScreen}
+          options={{
+            tabBarLabel: 'Schedule',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="calendar" color={color} size={size} />
+            ),
+          }}
+        />
+      ) : (
+        <Tab.Screen 
+          name="Location" 
+          component={LocationScreen}
+          options={{
+            tabBarLabel: 'Location',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="map-marker" color={color} size={size} />
+            ),
+          }}
+        />
+      )}
+      <Tab.Screen 
+        name="Support" 
+        component={SupportStackScreen}
+        options={{
+          tabBarLabel: 'Support',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="help-circle-outline" color={color} size={size} />
           ),
         }}
       />
@@ -148,10 +216,11 @@ export default function AppNavigator() {
   // Show appropriate splash when user logs in for the first time or mode changes
   React.useEffect(() => {
     if (!loading && user) {
-      const currentMode = user.isAgent ? 'agent' : 'user';
+      const currentMode = user.currentMode || 'user'; // Use actual currentMode, not isAgent flag
       
       console.log('🧭 AppNavigator: Mode effect triggered', {
         currentMode,
+        userCurrentMode: user.currentMode,
         lastMode,
         hasShownSplash,
         agentOnboardingCompleted: user.agentOnboardingCompleted,
@@ -160,13 +229,13 @@ export default function AppNavigator() {
       
       // Show splash on first load or mode change
       if (!hasShownSplash || (lastMode && lastMode !== currentMode)) {
-        if (user.isAgent && user.agentOnboardingCompleted) {
-          console.log('🎯 AppNavigator: Showing agent splash for completed agent');
+        if (currentMode === 'agent' && user.agentOnboardingCompleted) {
+          console.log('🎯 AppNavigator: Showing agent splash for agent mode');
           setShowAgentSplash(true);
-        } else if (!user.isAgent) {
-          console.log('🎯 AppNavigator: Showing user splash');
+        } else if (currentMode === 'user') {
+          console.log('🎯 AppNavigator: Showing user splash for user mode');
           setShowUserSplash(true);
-        } else if (user.isAgent && !user.agentOnboardingCompleted) {
+        } else if (currentMode === 'agent' && !user.agentOnboardingCompleted) {
           console.log('🎯 AppNavigator: Agent mode but onboarding not completed - will show onboarding');
           // No splash needed, user will be directed to onboarding
         }
