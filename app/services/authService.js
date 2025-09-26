@@ -1,4 +1,5 @@
 import axios from 'axios';
+import * as SecureStore from 'expo-secure-store';
 import config from '../config';
 
 const api = axios.create({
@@ -107,5 +108,16 @@ export const resetPassword = async (token, newPassword) => {
   } catch (error) {
     console.error('Password reset error:', error.response?.data || error.message);
     throw error;
+  }
+};
+
+export const getToken = async () => {
+  try {
+    const token = await SecureStore.getItemAsync('userToken');
+    console.log('🔐 AuthService: Token retrieved for request:', token ? 'Present' : 'Not found');
+    return token;
+  } catch (error) {
+    console.error('❌ AuthService: Error retrieving token:', error);
+    return null;
   }
 };

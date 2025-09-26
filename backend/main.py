@@ -7,6 +7,8 @@ from shared.admin.routes import router as admin_router
 from shared.category.routes import router as category_router
 from shared.agent.routes import router as agent_router
 from shared.database import engine, Base
+# Import models so they register with Base
+from shared.user.models import User, Agent, Category, AgentCategory, Booking, Rating
 import time
 import logging
 
@@ -34,14 +36,19 @@ app.add_middleware(
 async def startup_event():
     logger.info("🚀 Starting ClickO API...")
     
-    # Verify database connection
+    # Verify database connection and create tables
     try:
         # Test database connection
         connection = engine.connect()
         connection.close()
         logger.info("✅ Database connection verified")
+        
+        # Create all tables
+        from shared.database import create_tables
+        create_tables()
+        logger.info("✅ Database tables created/verified")
     except Exception as e:
-        logger.error(f"❌ Database connection failed: {e}")
+        logger.error(f"❌ Database initialization failed: {e}")
         raise e
     
     logger.info("✅ ClickO API startup complete")

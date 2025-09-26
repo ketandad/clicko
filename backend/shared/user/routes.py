@@ -1,11 +1,13 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from ..database import get_db
 from ..auth.jwt import get_current_user
-from .models import User, Agent
+from .models import User, Agent, Category, SubCategory, AgentCategory, AgentSubCategory
 import shutil
 import os
+import json
+import uuid
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -109,18 +111,17 @@ async def get_user_profile(user_id: int, db: Session = Depends(get_db), current_
             detail="User not found"
         )
     
-    # Return user profile data
+    # Return user profile data (only User model fields - no Agent-specific fields)
     return {
         "id": user.id,
         "name": user.name,
         "email": user.email,
-        "phone": user.phone,
-        "address": user.address,
-        "profile_image_url": user.profile_image_url,
-        "email_notifications": getattr(user, "email_notifications", True),
-        "push_notifications": getattr(user, "push_notifications", True),
+        "phone": user.phone,  # Basic phone for customers
         "created_at": user.created_at,
-        "is_agent": user.is_agent
+        "is_agent": user.is_agent,
+        # Default notification preferences (could be added to User model later if needed)
+        "email_notifications": True,
+        "push_notifications": True
     }
 
 @router.put("/{user_id}/")
@@ -241,3 +242,182 @@ async def upload_profile_image(
         "message": "Profile image uploaded successfully",
         "profile_image_url": file_url
     }
+
+@router.post("/agent/onboard")
+async def complete_agent_onboarding(
+    # Personal details
+    formatted_phone: str = Form(...),
+    experience_years: int = Form(0),
+    bio: str = Form(""),
+    
+    # Address details
+    address_line_1: str = Form(...),
+    address_line_2: str = Form(""),
+    city: str = Form(...),
+    state: str = Form(...),
+    postal_code: str = Form(...),
+    location: str = Form(...),  # "latitude,longitude"
+    
+    # Category and sub-category selections
+    primary_category_id: int = Form(...),
+    sub_category_ids: str = Form("[]"),  # JSON array string
+    
+    # KYC details
+    kyc_document_type: str = Form(...),
+    
+    # File uploads
+    profile_image: UploadFile = File(...),
+    selfie_verification: UploadFile = File(...),
+    kyc_document: UploadFile = File(...),
+    
+    # Dependencies
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Complete agent onboarding with all data and files in a single submission
+    """
+    try:
+        # Parse sub-category IDs
+        sub_category_list = json.loads(sub_category_ids) if sub_category_ids else []
+        
+        # Check if user already has an agent profile
+        existing_agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+        if existing_agent:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User already has an agent profile"
+            )
+        
+        # Validate category exists
+        category = db.query(Category).filter(Category.id == primary_category_id).first()
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid category selected"
+            )
+        
+        # Validate sub-categories exist and belong to the selected category
+        sub_categories = []
+        if sub_category_list:
+            sub_categories = db.query(SubCategory).filter(
+                SubCategory.id.in_(sub_category_list),
+                SubCategory.category_id == primary_category_id
+            ).all()
+            
+            if len(sub_categories) != len(sub_category_list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid sub-categories selected"
+                )
+        
+        # Create upload directories
+        upload_dirs = {
+            'profile': './uploads/profile_images',
+            'selfie': './uploads/selfie_verifications',
+            'kyc': './uploads/kyc_documents'
+        }
+        
+        for dir_path in upload_dirs.values():
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # Upload files and generate URLs
+        file_uploads = {}
+        files_to_upload = [
+            ('profile', profile_image),
+            ('selfie', selfie_verification),
+            ('kyc', kyc_document)
+        ]
+        
+        for file_type, file_obj in files_to_upload:
+            if file_obj and file_obj.filename:
+                # Generate unique filename
+                ext = os.path.splitext(file_obj.filename)[1] or '.jpg'
+                filename = f"{file_type}_{current_user.id}_{uuid.uuid4().hex}{ext}"
+                file_path = os.path.join(upload_dirs[file_type], filename)
+                
+                # Save file
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file_obj.file, buffer)
+                
+                # Store relative URL
+                file_uploads[file_type] = f"/uploads/{file_type}_{'verifications' if file_type == 'selfie' else 'images' if file_type == 'profile' else 'documents'}/{filename}"
+        
+        # Create agent profile
+        new_agent = Agent(
+            user_id=current_user.id,
+            formatted_phone=formatted_phone,
+            experience_years=experience_years,
+            bio=bio,
+            
+            # Address details
+            address_line_1=address_line_1,
+            address_line_2=address_line_2,
+            city=city,
+            state=state,
+            postal_code=postal_code,
+            location=location,
+            
+            # File URLs
+            profile_photo_url=file_uploads.get('profile'),
+            selfie_verification_url=file_uploads.get('selfie'),
+            kyc_document_path=file_uploads.get('kyc'),
+            kyc_document_type=kyc_document_type,
+            
+            # Default values
+            rate_per_km=20.0,
+            wallet_balance=1000.0,
+            kyc_status="pending",
+            selfie_verification_status="pending"
+        )
+        
+        db.add(new_agent)
+        db.flush()  # Get the agent ID
+        
+        # Update user to mark as agent
+        current_user.is_agent = True
+        current_user.updated_at = datetime.utcnow()
+        
+        # Add category relationship
+        agent_category = AgentCategory(
+            agent_id=new_agent.id,
+            category_id=primary_category_id
+        )
+        db.add(agent_category)
+        
+        # Add sub-category relationships
+        for sub_category in sub_categories:
+            agent_sub_category = AgentSubCategory(
+                agent_id=new_agent.id,
+                sub_category_id=sub_category.id
+            )
+            db.add(agent_sub_category)
+        
+        # Commit all changes
+        db.commit()
+        
+        return {
+            "message": "Agent onboarding completed successfully",
+            "agent_id": new_agent.id,
+            "status": "pending_verification",
+            "kyc_status": "pending",
+            "selfie_verification_status": "pending",
+            "files_uploaded": {
+                "profile_image": bool(file_uploads.get('profile')),
+                "selfie_verification": bool(file_uploads.get('selfie')),
+                "kyc_document": bool(file_uploads.get('kyc'))
+            },
+            "categories": {
+                "primary_category": category.name,
+                "sub_categories": [sc.name for sc in sub_categories]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Onboarding failed: {str(e)}"
+        )
