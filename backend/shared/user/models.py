@@ -59,7 +59,19 @@ class Agent(Base):
     postal_code = Column(String, nullable=True)
     country = Column(String, nullable=True, default="India")
     google_place_id = Column(String, nullable=True)  # For Google Places integration
-    location = Column(String, nullable=True)  # Format: "latitude,longitude"
+    location = Column(String, nullable=True)  # Legacy format: "latitude,longitude"
+    
+    # Enhanced location tracking for geospatial queries and scalability
+    current_latitude = Column(Float, nullable=True, index=True)  # Current GPS latitude
+    current_longitude = Column(Float, nullable=True, index=True)  # Current GPS longitude
+    service_radius_km = Column(Float, nullable=False, default=10.0)  # Service area radius in KM
+    last_location_update = Column(DateTime, nullable=True)  # Last GPS update timestamp
+    location_accuracy = Column(Float, nullable=True)  # GPS accuracy in meters
+    is_location_enabled = Column(Boolean, default=True)  # Agent's location sharing preference
+    
+    # Base/home location (where agent is based - for service area calculation)
+    base_latitude = Column(Float, nullable=True)  # Agent's home/base latitude
+    base_longitude = Column(Float, nullable=True)  # Agent's home/base longitude
     
     # KYC fields
     kyc_document_type = Column(String, nullable=True)

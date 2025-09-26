@@ -125,9 +125,9 @@ export default function HomeScreen() {
   };
 
   const handleCategorySelect = (category) => {
-    navigation.navigate('AgentList', { 
-      categoryId: category.id,
-      categoryName: category.name 
+    navigation.navigate('AgentDiscovery', { 
+      serviceCategory: category.name,
+      categoryId: category.id
     });
   };
 

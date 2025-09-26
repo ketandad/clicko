@@ -19,6 +19,8 @@ import AgentServiceCRUD from '../screens/AgentServiceCRUDSimple';
 import SupportScreen from '../screens/SupportScreen';
 import LocationScreen from '../screens/LocationScreen';
 import AgentOnboardingScreen from '../screens/AgentOnboardingScreen';
+import AgentDiscoveryScreen from '../screens/AgentDiscoveryScreen';
+import BookingEstimateScreen from '../screens/BookingEstimateScreen';
 import TermsOfServiceScreen from '../screens/TermsOfServiceScreen';
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -59,8 +61,10 @@ function HomeStackScreen() {
         component={user?.currentMode === 'agent' ? AgentHomeScreen : HomeScreen} 
       />
       <HomeStack.Screen name="AgentList" component={AgentListScreen} />
+      <HomeStack.Screen name="AgentDiscovery" component={AgentDiscoveryScreen} />
       <HomeStack.Screen name="AgentProfile" component={AgentProfileScreen} />
       <HomeStack.Screen name="Booking" component={BookingScreen} />
+      <HomeStack.Screen name="BookingEstimate" component={BookingEstimateScreen} />
       <HomeStack.Screen name="BookingHistory" component={BookingHistoryScreen} />
       <HomeStack.Screen name="AgentOnboarding" component={AgentOnboardingScreen} />
     </HomeStack.Navigator>
