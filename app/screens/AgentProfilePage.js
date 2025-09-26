@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Text,
@@ -24,7 +26,12 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, updateUserProfile } from '../services/userService';
 import { checkAgentProfile, getAgentStats } from '../services/agentService';
+import { getAgentSubCategories, getAgentCategories } from '../services/agentSubCategoryService';
+import * as SecureStore from 'expo-secure-store';
 import { colors } from '../theme';
+import PhoneInput from '../components/PhoneInput';
+import AddressAutocomplete from '../components/AddressAutocomplete';
+import PhotoCapture from '../components/PhotoCapture';
 
 // Professional agent color scheme - no green
 const agentColors = {
@@ -33,6 +40,7 @@ const agentColors = {
   accent: '#DC2626', // Red
   background: '#F8FAFC',
   surface: '#FFFFFF',
+  surfaceSecondary: '#F1F5F9', // Light gray for secondary surfaces
   text: '#1E293B',
   textSecondary: '#64748B',
   border: '#E2E8F0',
@@ -56,11 +64,26 @@ export default function AgentProfileScreen() {
     totalEarnings: 0,
   });
   
+  // Service management (subcategories + categories)
+  const [agentSubCategories, setAgentSubCategories] = useState([]);
+  const [agentCategories, setAgentCategories] = useState([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  
   // Form fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState(null);
+  const [formattedPhone, setFormattedPhone] = useState('');
+  const [addressData, setAddressData] = useState({
+    addressLine1: '',
+    addressLine2: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    country: 'India',
+  });
 
   useEffect(() => {
     loadProfile();
@@ -86,7 +109,23 @@ export default function AgentProfileScreen() {
       setName(profileData.name || '');
       setEmail(profileData.email || '');
       setPhone(profileData.phone || '');
+      setFormattedPhone(profileData.formatted_phone || profileData.phone || '');
       setAddress(profileData.address || '');
+      
+      // Set enhanced address data
+      setAddressData({
+        addressLine1: profileData.address_line_1 || '',
+        addressLine2: profileData.address_line_2 || '',
+        city: profileData.city || '',
+        state: profileData.state || '',
+        postalCode: profileData.postal_code || '',
+        country: profileData.country || 'India',
+      });
+      
+      // Set profile photo if available
+      if (profileData.profile_photo_url) {
+        setProfilePhoto({ uri: profileData.profile_photo_url });
+      }
       
       // Fetch latest agent profile data including wallet balance
       if (user?.isAgent) {
@@ -108,6 +147,9 @@ export default function AgentProfileScreen() {
 
           // Load agent statistics
           loadAgentStats();
+          
+          // Load agent services
+          loadServices();
         } catch (error) {
           console.error('❌ AgentProfile: Error fetching wallet balance:', error);
           console.log('🔧 AgentProfile: Using cached wallet balance');
@@ -121,6 +163,7 @@ export default function AgentProfileScreen() {
       // Load agent statistics if user is an agent
       if (user?.isAgent) {
         loadAgentStats();
+        loadServices();
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -155,10 +198,78 @@ export default function AgentProfileScreen() {
     }
   };
 
+  const loadServices = async () => {
+    // Get token directly from SecureStore like other services do
+    const authToken = await SecureStore.getItemAsync('userToken');
+    
+    console.log('🔍 AgentProfile: loadServices called', {
+      isAgent: user?.isAgent,
+      hasAuthToken: !!authToken,
+      userId: user?.id
+    });
+    
+    if (user?.isAgent && authToken) {
+      try {
+        setLoadingServices(true);
+        
+        // Load subcategories first
+        console.log('📞 AgentProfile: Calling getAgentSubCategories...');
+        const subCategories = await getAgentSubCategories(authToken);
+        console.log('📦 AgentProfile: Received subcategories:', subCategories);
+        setAgentSubCategories(subCategories);
+        
+        // If no subcategories, load main categories as fallback
+        if (subCategories.length === 0) {
+          console.log('📞 AgentProfile: No subcategories, loading categories...');
+          const categories = await getAgentCategories(authToken);
+          console.log('📦 AgentProfile: Received categories:', categories);
+          setAgentCategories(categories);
+        } else {
+          console.log('✅ AgentProfile: Found subcategories, clearing categories');
+          setAgentCategories([]); // Clear categories if we have subcategories
+        }
+        
+      } catch (error) {
+        console.error('❌ AgentProfile: Error loading services:', error);
+        // On error, still try to load categories as fallback
+        if (authToken) {
+          try {
+            const categories = await getAgentCategories(authToken);
+            setAgentCategories(categories);
+          } catch (catError) {
+            console.error('❌ AgentProfile: Error loading categories fallback:', catError);
+          }
+        }
+      } finally {
+        setLoadingServices(false);
+      }
+    } else {
+      console.log('❌ AgentProfile: Cannot load services - missing requirements:', {
+        isAgent: user?.isAgent,
+        hasAuthToken: !!authToken
+      });
+    }
+  };
+
+
+
   const handleSave = async () => {
     try {
       setLoading(true);
-      const updatedData = { name, email, phone, address };
+      const updatedData = { 
+        name, 
+        email, 
+        phone, 
+        formatted_phone: formattedPhone,
+        address,
+        address_line_1: addressData.addressLine1,
+        address_line_2: addressData.addressLine2,
+        city: addressData.city,
+        state: addressData.state,
+        postal_code: addressData.postalCode,
+        country: addressData.country,
+        profile_photo_url: profilePhoto?.uri || '',
+      };
       await updateUserProfile(user.id, updatedData);
       setProfile(prev => ({ ...prev, ...updatedData }));
       setEditMode(false);
@@ -232,15 +343,28 @@ export default function AgentProfileScreen() {
           <Card.Content>
             <View style={styles.statusRow}>
               <View style={styles.avatarSection}>
-                <Avatar.Text 
-                  size={80} 
-                  label={profile?.name?.charAt(0)?.toUpperCase() || 'A'} 
-                  style={[styles.avatar, { backgroundColor: agentColors.primary }]}
-                  labelStyle={styles.avatarLabel}
-                />
+                {profilePhoto ? (
+                  <Image
+                    source={profilePhoto}
+                    style={styles.profileImage}
+                    onError={() => setProfilePhoto(null)}
+                  />
+                ) : (
+                  <Avatar.Text 
+                    size={80} 
+                    label={profile?.name?.charAt(0)?.toUpperCase() || 'A'} 
+                    style={[styles.avatar, { backgroundColor: agentColors.primary }]}
+                    labelStyle={styles.avatarLabel}
+                  />
+                )}
                 <View style={styles.verifiedBadge}>
                   <Icon name="check-decagram" size={20} color={agentColors.success} />
                 </View>
+                {editMode && (
+                  <TouchableOpacity style={styles.editPhotoButton} onPress={() => {}}>
+                    <Icon name="camera" size={16} color="white" />
+                  </TouchableOpacity>
+                )}
               </View>
               <View style={styles.statusInfo}>
                 <Text style={styles.agentName}>{profile?.name || 'Agent Name'}</Text>
@@ -302,22 +426,36 @@ export default function AgentProfileScreen() {
                   style={styles.input}
                   theme={{ colors: { primary: agentColors.primary } }}
                 />
-                <TextInput
-                  label="Phone"
+                <PhoneInput
+                  label="Phone Number"
                   value={phone}
-                  onChangeText={setPhone}
-                  mode="outlined"
+                  onChangeText={(text) => {
+                    setPhone(text);
+                    setFormattedPhone(text);
+                  }}
                   style={styles.input}
-                  theme={{ colors: { primary: agentColors.primary } }}
                 />
-                <TextInput
+                <AddressAutocomplete
                   label="Address"
                   value={address}
-                  onChangeText={setAddress}
-                  mode="outlined"
-                  multiline
+                  onAddressSelect={(selectedAddress) => {
+                    setAddress(selectedAddress.fullAddress);
+                    setAddressData({
+                      addressLine1: selectedAddress.addressLine1,
+                      addressLine2: selectedAddress.addressLine2,
+                      city: selectedAddress.city,
+                      state: selectedAddress.state,
+                      postalCode: selectedAddress.postalCode,
+                      country: selectedAddress.country,
+                    });
+                  }}
                   style={styles.input}
-                  theme={{ colors: { primary: agentColors.primary } }}
+                />
+                <PhotoCapture
+                  photoType="profile"
+                  photo={profilePhoto}
+                  onPhotoCapture={setProfilePhoto}
+                  style={styles.photoCapture}
                 />
                 <Button 
                   mode="contained" 
@@ -340,11 +478,28 @@ export default function AgentProfileScreen() {
                 </View>
                 <View style={styles.infoRow}>
                   <Icon name="phone" size={20} color={agentColors.textSecondary} />
-                  <Text style={styles.infoText}>{phone || 'No phone number added'}</Text>
+                  <Text style={styles.infoText}>{formattedPhone || phone || 'No phone number added'}</Text>
                 </View>
                 <View style={styles.infoRow}>
                   <Icon name="map-marker" size={20} color={agentColors.textSecondary} />
-                  <Text style={styles.infoText}>{address || 'Not available'}</Text>
+                  <View style={styles.addressContainer}>
+                    {addressData.addressLine1 ? (
+                      <>
+                        <Text style={styles.infoText}>{addressData.addressLine1}</Text>
+                        {addressData.addressLine2 && (
+                          <Text style={styles.infoTextSecondary}>{addressData.addressLine2}</Text>
+                        )}
+                        <Text style={styles.infoTextSecondary}>
+                          {[addressData.city, addressData.state, addressData.postalCode].filter(Boolean).join(', ')}
+                        </Text>
+                        {addressData.country && addressData.country !== 'India' && (
+                          <Text style={styles.infoTextSecondary}>{addressData.country}</Text>
+                        )}
+                      </>
+                    ) : (
+                      <Text style={styles.infoText}>{address || 'Not available'}</Text>
+                    )}
+                  </View>
                 </View>
               </>
             )}
@@ -354,18 +509,60 @@ export default function AgentProfileScreen() {
         {/* Agent Services */}
         <Card style={styles.servicesCard}>
           <Card.Content>
-            <Text style={styles.sectionTitle}>Service Categories</Text>
-            <View style={styles.servicesList}>
-              <View style={styles.serviceChip}>
-                <Text style={styles.serviceText}>Home Cleaning</Text>
-              </View>
-              <View style={styles.serviceChip}>
-                <Text style={styles.serviceText}>Electrical</Text>
-              </View>
-              <View style={styles.serviceChip}>
-                <Text style={styles.serviceText}>Plumbing</Text>
-              </View>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Services</Text>
+              <TouchableOpacity 
+                onPress={() => navigation.navigate('AgentServiceCRUD')}
+                style={styles.editIconButton}
+              >
+                <Icon name="pencil" size={20} color={agentColors.primary} />
+              </TouchableOpacity>
             </View>
+            
+            {loadingServices ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={agentColors.primary} />
+                <Text style={styles.loadingText}>Loading services...</Text>
+              </View>
+            ) : agentSubCategories.length > 0 ? (
+              // Show subcategories
+              <View style={styles.servicesList}>
+                {agentSubCategories.map((subCategory) => (
+                  <View key={subCategory.id} style={styles.serviceChip}>
+                    <View style={styles.serviceInfo}>
+                      <Text style={styles.serviceText}>{subCategory.name}</Text>
+                      <Text style={styles.categoryText}>{subCategory.category_name}</Text>
+                      {subCategory.has_pricing && (
+                        <View style={styles.pricingIndicator}>
+                          <Icon name="currency-usd" size={12} color={agentColors.success} />
+                          <Text style={styles.pricingText}>Priced</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : agentCategories.length > 0 ? (
+              // Show main categories as fallback
+              <View style={styles.servicesList}>
+                {agentCategories.map((category) => (
+                  <View key={category.id} style={styles.serviceChip}>
+                    <View style={styles.serviceInfo}>
+                      <Text style={styles.serviceText}>{category.name}</Text>
+                      <Text style={styles.categoryText}>Main Category</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Icon name="briefcase-outline" size={48} color={agentColors.textSecondary} />
+                <Text style={styles.emptyStateTitle}>No Services Added</Text>
+                <Text style={styles.emptyStateText}>
+                  Tap the edit icon above to add and manage your services
+                </Text>
+              </View>
+            )}
           </Card.Content>
         </Card>
 
@@ -393,26 +590,10 @@ export default function AgentProfileScreen() {
         <Card style={styles.actionsCard}>
           <Card.Content>
             <Button 
-              mode="contained" 
-              icon="chart-line"
-              onPress={() => {}}
-              style={[styles.actionButton, { backgroundColor: agentColors.primary }]}
-            >
-              View Earnings Report
-            </Button>
-            <Button 
-              mode="contained" 
-              icon="calendar"
-              onPress={() => {}}
-              style={[styles.actionButton, { backgroundColor: agentColors.secondary }]}
-            >
-              Manage Schedule
-            </Button>
-            <Button 
               mode="outlined" 
               icon="logout"
               onPress={handleLogout}
-              style={[styles.actionButton, styles.logoutButton, { borderColor: agentColors.error }]}
+              style={[styles.mainActionButton, styles.logoutButton, { borderColor: agentColors.error }]}
               labelStyle={{ color: agentColors.error }}
             >
               Logout
@@ -611,10 +792,164 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     backgroundColor: agentColors.surface,
   },
-  actionButton: {
+  mainActionButton: {
     marginBottom: 12,
   },
   logoutButton: {
     backgroundColor: 'transparent',
+  },
+  // New styles for enhanced profile features
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    elevation: 4,
+  },
+  editPhotoButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: agentColors.primary,
+    borderRadius: 12,
+    padding: 4,
+  },
+  addressContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  infoTextSecondary: {
+    fontSize: 14,
+    color: agentColors.textSecondary,
+    marginTop: 2,
+  },
+  photoCapture: {
+    marginVertical: 12,
+  },
+  // New service management styles
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  editIconButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: agentColors.surface,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+  },
+  headerButton: {
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  serviceChip: {
+    backgroundColor: agentColors.surface,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: agentColors.border,
+  },
+  serviceChipContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  serviceInfo: {
+    flex: 1,
+  },
+  serviceText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: agentColors.text,
+    marginBottom: 2,
+  },
+  categoryText: {
+    fontSize: 12,
+    color: agentColors.textSecondary,
+    marginBottom: 4,
+  },
+  pricingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pricingText: {
+    fontSize: 11,
+    color: agentColors.success,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  serviceActions: {
+    flexDirection: 'row',
+  },
+  actionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  pricingButton: {
+    backgroundColor: agentColors.success,
+  },
+  addPricingButton: {
+    backgroundColor: agentColors.background,
+    borderWidth: 1,
+    borderColor: agentColors.primary,
+  },
+  removeButton: {
+    backgroundColor: agentColors.error,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: agentColors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: agentColors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  addFirstServiceButton: {
+    paddingHorizontal: 24,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  loadingText: {
+    marginLeft: 8,
+    color: agentColors.textSecondary,
+  },
+
+
+  upgradeText: {
+    fontSize: 13,
+    color: agentColors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  upgradeButton: {
+    paddingHorizontal: 16,
   },
 });

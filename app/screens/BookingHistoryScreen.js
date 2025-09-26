@@ -10,6 +10,7 @@ export default function BookingHistoryScreen({ navigation }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const isAgent = user?.currentMode === 'agent';
 
   useEffect(() => {
     loadBookingHistory();
@@ -19,10 +20,44 @@ export default function BookingHistoryScreen({ navigation }) {
     try {
       setLoading(true);
       // TODO: Implement booking history API call
-      // const history = await getBookingHistory(user.id);
+      // const history = isAgent ? await getAgentServiceHistory(user.id) : await getBookingHistory(user.id);
       
-      // Mock data for now
-      const mockBookings = [
+      // Mock data - different for agent vs customer
+      const mockBookings = isAgent ? [
+        {
+          id: 1,
+          serviceName: 'AC Repair',
+          customerName: 'Rajesh Kumar',
+          date: '2025-01-20',
+          status: 'completed',
+          amount: 500,
+          rating: 4.5,
+          customerPhone: '+91 98765 43210',
+          address: 'Sector 15, Pune'
+        },
+        {
+          id: 2,
+          serviceName: 'Washing Machine Installation',
+          customerName: 'Priya Sharma',
+          date: '2025-01-18',
+          status: 'completed',
+          amount: 300,
+          rating: 5.0,
+          customerPhone: '+91 87654 32109',
+          address: 'Kothrud, Pune'
+        },
+        {
+          id: 3,
+          serviceName: 'Refrigerator Repair',
+          customerName: 'Amit Patel',
+          date: '2025-01-15',
+          status: 'cancelled',
+          amount: 0,
+          rating: null,
+          customerPhone: '+91 76543 21098',
+          address: 'Baner, Pune'
+        }
+      ] : [
         {
           id: 1,
           serviceName: 'House Cleaning',
@@ -84,7 +119,9 @@ export default function BookingHistoryScreen({ navigation }) {
         <View style={styles.bookingDetails}>
           <View style={styles.detailRow}>
             <Icon name="account" size={16} color={colors.textSecondary} />
-            <Text style={styles.detailText}>Agent: {booking.agentName}</Text>
+            <Text style={styles.detailText}>
+              {isAgent ? `Customer: ${booking.customerName}` : `Agent: ${booking.agentName}`}
+            </Text>
           </View>
           
           <View style={styles.detailRow}>
@@ -92,10 +129,27 @@ export default function BookingHistoryScreen({ navigation }) {
             <Text style={styles.detailText}>Date: {booking.date}</Text>
           </View>
           
+          {isAgent && booking.address && (
+            <View style={styles.detailRow}>
+              <Icon name="map-marker" size={16} color={colors.textSecondary} />
+              <Text style={styles.detailText}>Location: {booking.address}</Text>
+            </View>
+          )}
+          
           <View style={styles.detailRow}>
-            <Icon name="currency-usd" size={16} color={colors.textSecondary} />
-            <Text style={styles.detailText}>Amount: ${booking.amount}</Text>
+            <Icon name="currency-inr" size={16} color={colors.textSecondary} />
+            <Text style={styles.detailText}>
+              Amount: ₹{booking.amount}
+              {isAgent && booking.status === 'completed' && ` (Earned)`}
+            </Text>
           </View>
+          
+          {isAgent && booking.rating && (
+            <View style={styles.detailRow}>
+              <Icon name="star" size={16} color={colors.warning || '#FF9800'} />
+              <Text style={styles.detailText}>Rating: {booking.rating}/5.0</Text>
+            </View>
+          )}
         </View>
       </Card.Content>
     </Card>
@@ -106,11 +160,13 @@ export default function BookingHistoryScreen({ navigation }) {
       <View style={styles.container}>
         <Appbar.Header>
           <Appbar.BackAction onPress={() => navigation.goBack()} />
-          <Appbar.Content title="Booking History" />
+          <Appbar.Content title={isAgent ? "Service History" : "Booking History"} />
         </Appbar.Header>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading booking history...</Text>
+          <Text style={styles.loadingText}>
+            {isAgent ? "Loading service history..." : "Loading booking history..."}
+          </Text>
         </View>
       </View>
     );
@@ -120,7 +176,7 @@ export default function BookingHistoryScreen({ navigation }) {
     <View style={styles.container}>
       <Appbar.Header>
         <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Booking History" />
+        <Appbar.Content title={isAgent ? "Service History" : "Booking History"} />
       </Appbar.Header>
 
       <ScrollView 
@@ -133,9 +189,16 @@ export default function BookingHistoryScreen({ navigation }) {
           bookings.map(renderBookingCard)
         ) : (
           <View style={styles.emptyContainer}>
-            <Icon name="calendar-remove" size={64} color={colors.textSecondary} />
-            <Text style={styles.emptyText}>No booking history found</Text>
-            <Text style={styles.emptySubtext}>Your completed bookings will appear here</Text>
+            <Icon name={isAgent ? "tools" : "calendar-remove"} size={64} color={colors.textSecondary} />
+            <Text style={styles.emptyText}>
+              {isAgent ? "No service history found" : "No booking history found"}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {isAgent 
+                ? "Your completed services will appear here" 
+                : "Your completed bookings will appear here"
+              }
+            </Text>
           </View>
         )}
       </ScrollView>

@@ -8,8 +8,6 @@ import {
   Alert,
   Dimensions,
   StatusBar,
-  ActivityIndicator,
-  Linking,
 } from 'react-native';
 import {
   Text,
@@ -19,68 +17,252 @@ import {
   Chip,
   ProgressBar,
   IconButton,
+  Checkbox,
+  Divider,
+  ActivityIndicator,
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Location from 'expo-location';
+import * as SecureStore from 'expo-secure-store';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from '../contexts/LocationContext';
 import { getCategories } from '../services/categoryService';
-import { getUserProfile } from '../services/userService';
-import * as SecureStore from 'expo-secure-store';
-import config from '../config';
+// import { getSubCategories } from '../services/subCategoryService'; // Removed - using cached data
+import { submitAgentOnboarding } from '../services/agentOnboardingService';
+import { colors } from '../theme';
 
-// Use config API URL instead of hardcoded
-const API_BASE_URL = config.API_URL;
+// Import components
+import PhoneInput from '../components/PhoneInput';
+import AddressAutocomplete from '../components/AddressAutocomplete';
+import PhotoCapture from '../components/PhotoCapture';
 
 const ONBOARDING_STEPS = [
   { id: 1, title: 'Basic Info', icon: 'account' },
-  { id: 2, title: 'Identity Verification', icon: 'card-account-details' },
-  { id: 3, title: 'Location Setup', icon: 'map-marker' },
-  { id: 4, title: 'Service Categories', icon: 'view-grid' },
-  { id: 5, title: 'Complete', icon: 'check-circle' },
+  { id: 2, title: 'Profile Photo', icon: 'camera' },
+  { id: 3, title: 'Identity Verification', icon: 'card-account-details' },
+  { id: 4, title: 'Selfie Verification', icon: 'face-recognition' },
+  { id: 5, title: 'Location Setup', icon: 'map-marker' },
+  { id: 6, title: 'Terms & Agreement', icon: 'file-document' },
+  { id: 7, title: 'Final Submission', icon: 'check-circle' }
 ];
+
+// Cached sub-categories data (matches backend database)
+const CACHED_SUB_CATEGORIES = {
+  2: [ // Home Appliances
+    { id: 13, name: 'Washing Machine Repair', description: 'Repair and servicing of washing machines' },
+    { id: 14, name: 'Refrigerator Repair', description: 'Fridge and freezer repair services' },
+    { id: 15, name: 'Microwave Repair', description: 'Microwave oven repair and maintenance' },
+    { id: 16, name: 'TV Repair', description: 'Television and display repair services' },
+    { id: 17, name: 'Water Purifier Service', description: 'RO and water purifier maintenance' },
+    { id: 18, name: 'Dishwasher Repair', description: 'Dishwasher repair and maintenance' },
+    { id: 19, name: 'Geyser Repair', description: 'Water heater and geyser repair services' }
+  ],
+  12: [ // Photographer
+    { id: 7, name: 'Wedding Photography', description: 'Complete wedding event photography and videography' },
+    { id: 8, name: 'Portrait Photography', description: 'Individual and family portrait sessions' },
+    { id: 9, name: 'Event Photography', description: 'Birthday parties, anniversaries, and celebrations' },
+    { id: 10, name: 'Product Photography', description: 'Commercial product shoots for businesses' },
+    { id: 11, name: 'Baby Photography', description: 'Newborn and baby photoshoot sessions' },
+    { id: 12, name: 'Pre-Wedding Shoot', description: 'Couple photography sessions before wedding' }
+  ],
+  14: [ // Spa & Massage
+    { id: 1, name: 'Full Body Massage', description: 'Complete body relaxation massage therapy' },
+    { id: 2, name: 'Head & Neck Massage', description: 'Focused massage for head, neck and shoulder areas' },
+    { id: 3, name: 'Foot Massage', description: 'Relaxing foot and leg massage service' },
+    { id: 4, name: 'Aromatherapy', description: 'Essential oil-based therapeutic massage' },
+    { id: 5, name: 'Deep Tissue Massage', description: 'Therapeutic deep muscle massage for pain relief' },
+    { id: 6, name: 'Couple Massage', description: 'Relaxing massage sessions for couples' }
+  ]
+};
+
+const KYC_DOCUMENT_TYPES = [
+  { value: 'aadhar', label: 'Aadhar Card', icon: 'card-account-details' },
+  { value: 'pan', label: 'PAN Card', icon: 'credit-card' },
+  { value: 'driving_license', label: 'Driving License', icon: 'car' },
+  { value: 'passport', label: 'Passport', icon: 'passport' },
+];
+
+const CACHE_KEYS = {
+  ONBOARDING_DATA: 'agent_onboarding_cache',
+  CURRENT_STEP: 'agent_onboarding_step',
+};
 
 export default function AgentOnboardingScreen() {
   const navigation = useNavigation();
-  const { user, toggleAgentMode, completeAgentOnboarding, setCurrentMode } = useAuth();
+  const { user, updateUserProfile } = useAuth();
   const { selectedLocation } = useLocation();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
-  const [categories, setCategories] = useState([]);
-  
-  const [formData, setFormData] = useState({
-    name: '',
+  const [submitting, setSubmitting] = useState(false);
+
+  // Cached form data - everything stored locally until final submission
+  const [cachedData, setCachedData] = useState({
+    // Step 1: Basic Info
     phone: '',
-    email: '',
+    experienceYears: '',
+    primaryCategory: '', // Main service category ID
+    selectedSubCategories: [], // Sub-categories for primary category
+    ratePerKm: '20',
+    
+    // Step 2: Profile Photo
+    profilePhoto: null, // Will store base64 or local URI
+    
+    // Step 3: KYC Document
+    kycDocumentType: '',
+    kycDocument: null,
+    
+    // Step 4: Selfie
+    selfiePhoto: null,
+    
+    // Step 5: Location
     address: '',
-    experience: '',
-    aadhaarDocument: null,
-    location: null,
-    detectedAddress: '',
-    selectedCategories: [],
+    coordinates: null,
+    
+    // Step 7: Agreement
+    acceptedTerms: false,
+    acceptedPrivacy: false,
   });
 
+  const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState({});
+
   useEffect(() => {
+    loadCachedData();
     loadCategories();
-    loadUserProfile();
-    autoDetectLocation();
   }, []);
 
-  // Auto-detect location from LocationContext
+  // Load sub-categories when categories are loaded and there's a cached primary category
   useEffect(() => {
-    if (selectedLocation && selectedLocation.coordinates && !formData.location) {
-      console.log('📍 Auto-filling location from LocationContext:', selectedLocation.coordinates);
-      updateFormData('location', {
-        latitude: selectedLocation.coordinates.latitude,
-        longitude: selectedLocation.coordinates.longitude,
-      });
+    if (categories.length > 0 && cachedData.primaryCategory) {
+      loadSubCategories(cachedData.primaryCategory);
     }
-  }, [selectedLocation]);
+  }, [categories, cachedData.primaryCategory]);
+
+  // Handle navigation focus to ensure clean state on re-entry
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Reload cached data when screen comes into focus
+      // This ensures fresh state if user navigated away and back
+      loadCachedData();
+      console.log('🔄 Onboarding screen focused - reloaded cached data');
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  // Load cached data from storage
+  const loadCachedData = async () => {
+    try {
+      const cached = await SecureStore.getItemAsync(CACHE_KEYS.ONBOARDING_DATA);
+      const cachedStep = await SecureStore.getItemAsync(CACHE_KEYS.CURRENT_STEP);
+      
+      if (cached) {
+        const parsedData = JSON.parse(cached);
+        // Ensure arrays are always initialized
+        setCachedData({
+          ...parsedData,
+          selectedSubCategories: parsedData.selectedSubCategories || []
+        });
+      }
+      
+      if (cachedStep) {
+        setCurrentStep(parseInt(cachedStep));
+      }
+    } catch (error) {
+      console.error('Error loading cached onboarding data:', error);
+    }
+  };
+
+  // Save data to cache with validation
+  const saveCachedData = async (newData) => {
+    try {
+      let updatedData = { ...cachedData, ...newData };
+      
+      // Validate selectedSubCategories belong to current primaryCategory
+      if (newData.selectedSubCategories && updatedData.primaryCategory) {
+        const validSubCategoryIds = CACHED_SUB_CATEGORIES[updatedData.primaryCategory]?.map(sub => sub.id) || [];
+        const invalidIds = updatedData.selectedSubCategories.filter(id => !validSubCategoryIds.includes(id));
+        
+        if (invalidIds.length > 0) {
+          console.warn(`⚠️ Removing invalid sub-category IDs [${invalidIds.join(', ')}] for category ${updatedData.primaryCategory}`);
+          updatedData.selectedSubCategories = updatedData.selectedSubCategories.filter(id => validSubCategoryIds.includes(id));
+        }
+      }
+      
+      // Validate experience years is a number
+      if (newData.experienceYears && isNaN(parseInt(newData.experienceYears))) {
+        console.warn('⚠️ Invalid experience years value, converting to string');
+        updatedData.experienceYears = String(newData.experienceYears);
+      }
+      
+      setCachedData(updatedData);
+      await SecureStore.setItemAsync(CACHE_KEYS.ONBOARDING_DATA, JSON.stringify(updatedData));
+      console.log('✅ Onboarding data cached successfully');
+    } catch (error) {
+      console.error('❌ Error caching onboarding data:', error);
+    }
+  };
+
+  // Save current step
+  const saveCurrentStep = async (step) => {
+    try {
+      await SecureStore.setItemAsync(CACHE_KEYS.CURRENT_STEP, step.toString());
+      setCurrentStep(step);
+    } catch (error) {
+      console.error('Error saving current step:', error);
+    }
+  };
+
+  // Clear all onboarding cache and reset form state
+  const clearOnboardingCache = async (showSuccessMessage = false) => {
+    try {
+      // Remove cached data from secure storage
+      await SecureStore.deleteItemAsync(CACHE_KEYS.ONBOARDING_DATA);
+      await SecureStore.deleteItemAsync(CACHE_KEYS.CURRENT_STEP);
+      
+      // Reset component state to initial values
+      setCachedData({
+        phone: '',
+        experienceYears: '',
+        primaryCategory: '',
+        selectedSubCategories: [],
+        ratePerKm: '20',
+        profilePhoto: null,
+        kycDocumentType: '',
+        kycDocument: null,
+        selfiePhoto: null,
+        address: '',
+        coordinates: null,
+        acceptedTerms: false,
+        acceptedPrivacy: false,
+      });
+      
+      // Reset to first step
+      setCurrentStep(1);
+      
+      // Clear sub-categories state
+      setSubCategories({});
+      
+      console.log('✅ Onboarding cache cleared successfully');
+      
+      // Show brief success feedback if requested
+      if (showSuccessMessage) {
+        Alert.alert(
+          'Form Reset',
+          'Your onboarding form has been reset successfully.',
+          [{ text: 'OK' }],
+          { cancelable: true }
+        );
+      }
+    } catch (error) {
+      console.error('❌ Error clearing onboarding cache:', error);
+      if (showSuccessMessage) {
+        Alert.alert('Error', 'Failed to reset form. Please try again.');
+      }
+    }
+  };
 
   const loadCategories = async () => {
     try {
@@ -91,724 +273,651 @@ export default function AgentOnboardingScreen() {
     }
   };
 
-  const loadUserProfile = async () => {
-    try {
-      if (user?.id) {
-        const profile = await getUserProfile(user.id);
-        setFormData(prev => ({
-          ...prev,
-          name: profile.name || user.name || '',
-          email: profile.email || '',
-          phone: profile.phone || '',
-          address: profile.address || '',
-        }));
-        console.log('✅ Pre-filled user data from profile');
-      }
-    } catch (error) {
-      console.error('Error loading user profile:', error);
-      // Still pre-fill with available user data
-      setFormData(prev => ({
-        ...prev,
-        name: user?.name || '',
-        email: user?.email || '',
-      }));
+  // Load sub-categories when primary category changes (using cached data)
+  const loadSubCategories = (categoryId) => {
+    if (!categoryId) {
+      console.log('⚠️ No categoryId provided to loadSubCategories');
+      return;
     }
-  };
-
-  const autoDetectLocation = async () => {
-    try {
-      console.log('📍 Auto-detecting location for onboarding...');
-      
-      // First check if we already have location in selectedLocation
-      if (selectedLocation && selectedLocation.coordinates) {
-        console.log('📍 Using existing location from LocationContext');
-        updateFormData('location', {
-          latitude: selectedLocation.coordinates.latitude,
-          longitude: selectedLocation.coordinates.longitude,
-        });
-        return;
-      }
-      
-      // If no existing location, try to get current location
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('📍 Location permission not granted for auto-detection');
-        return;
-      }
-
-      let location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      
-      console.log('📍 Auto-detected location coordinates:', location.coords);
-      updateFormData('location', {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-      
-    } catch (error) {
-      console.log('📍 Auto-location detection failed (will use manual method):', error.message);
-      // Don't show error to user, they can still use manual location button
-    }
-  };
-
-  const updateFormData = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleClose = () => {
-    Alert.alert(
-      'Exit Onboarding',
-      'Are you sure you want to exit the onboarding process? Your progress will be lost.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Exit', 
-          style: 'destructive',
-          onPress: () => navigation.goBack()
-        }
-      ]
-    );
-  };
-
-  const handleNext = async () => {
-    if (!validateCurrentStep()) return;
     
-    if (currentStep < ONBOARDING_STEPS.length) {
-      setCurrentStep(prev => prev + 1);
-    } else {
-      await completeOnboarding();
+    // Check if categories are loaded
+    if (!categories || categories.length === 0) {
+      console.log('⚠️ Categories not loaded yet, deferring sub-category load');
+      return;
+    }
+    
+    try {
+      const category = categories.find(cat => cat.id === parseInt(categoryId));
+      if (!category) {
+        console.error(`❌ Category with ID ${categoryId} not found in loaded categories`);
+        return;
+      }
+      
+      if (category.has_sub_categories) {
+        const cachedSubCategories = CACHED_SUB_CATEGORIES[categoryId] || [];
+        console.log(`📋 Loading ${cachedSubCategories.length} cached sub-categories for category ${categoryId} (${category.name})`);
+        setSubCategories(prev => ({
+          ...prev,
+          [categoryId]: cachedSubCategories
+        }));
+      } else {
+        console.log(`📋 Category ${category.name} does not have sub-categories`);
+        // Clear sub-categories for categories that don't have them
+        setSubCategories(prev => {
+          const updated = { ...prev };
+          delete updated[categoryId];
+          return updated;
+        });
+      }
+    } catch (error) {
+      console.error('❌ Failed to load cached sub-categories:', error);
     }
   };
 
-  const handleBack = () => {
-    if (currentStep > 1) {
-      setCurrentStep(prev => prev - 1);
+  const handleNext = () => {
+    if (validateCurrentStep()) {
+      const nextStep = currentStep + 1;
+      saveCurrentStep(nextStep);
+    }
+  };
+
+  const handlePrevious = () => {
+    const prevStep = currentStep - 1;
+    if (prevStep >= 1) {
+      saveCurrentStep(prevStep);
+    }
+  };
+
+  const handleBackPress = () => {
+    // Check if there's any cached data to lose
+    const hasData = cachedData.phone || cachedData.primaryCategory || cachedData.profilePhoto || 
+                   cachedData.kycDocument || cachedData.selfiePhoto || cachedData.address;
+    
+    if (hasData) {
+      Alert.alert(
+        'Exit Onboarding',
+        'Are you sure you want to exit? All your progress will be lost and you\'ll need to start over.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Exit & Clear', 
+            style: 'destructive',
+            onPress: async () => {
+              await clearOnboardingCache();
+              navigation.goBack();
+            }
+          }
+        ]
+      );
+    } else {
+      // No data to lose, just go back
+      navigation.goBack();
     }
   };
 
   const validateCurrentStep = () => {
     switch (currentStep) {
       case 1:
-        if (!formData.name || !formData.phone || !formData.email) {
-          Alert.alert('Error', 'Please fill all required fields');
+        if (!cachedData.phone || !cachedData.primaryCategory || !cachedData.experienceYears) {
+          Alert.alert('Missing Information', 'Please fill all required fields: phone number, experience years, and primary service category');
           return false;
         }
-        return true;
-      case 2:
-        if (!formData.aadhaarDocument) {
-          Alert.alert('Error', 'Please upload your Aadhaar card');
-          return false;
-        }
-        return true;
-      case 3:
-        if (!formData.location) {
-          Alert.alert('Error', 'Please enable location access');
-          return false;
-        }
-        return true;
-      case 4:
-        if (formData.selectedCategories.length === 0) {
-          Alert.alert('Error', 'Please select at least one service category');
-          return false;
-        }
-        return true;
-      default:
-        return true;
-    }
-  };
-
-  const pickDocument = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'application/pdf'],
-        copyToCacheDirectory: true,
-      });
-      
-      if (!result.canceled) {
-        updateFormData('aadhaarDocument', result.assets[0]);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to pick document');
-    }
-  };
-
-  const requestLocationPermission = async () => {
-    try {
-      setLocationLoading(true);
-      
-      // Request permission
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission Required', 
-          'We need access to your location to show you nearby booking requests. Please enable location services in your device settings.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() }
-          ]
-        );
-        return;
-      }
-
-      // Check if location services are enabled
-      const locationEnabled = await Location.hasServicesEnabledAsync();
-      if (!locationEnabled) {
-        Alert.alert(
-          'Location Services Disabled',
-          'Please enable location services in your device settings to detect your location.',
-          [
-            { text: 'OK' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() }
-          ]
-        );
-        return;
-      }
-
-      // Get current position
-      let location;
-      try {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-          timeout: 15000, // 15 second timeout
-        });
-      } catch (locationError) {
-        console.error('Failed to get location:', locationError);
-        Alert.alert(
-          'Location Detection Failed',
-          'Unable to detect your current location. This could be due to poor GPS signal or network issues. Please try again or move to an area with better signal.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      
-      const coords = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      };
-      
-      // Get human-readable address
-      let detectedAddress = 'Location detected';
-      try {
-        const geocodeResult = await Location.reverseGeocodeAsync(coords);
-        if (geocodeResult && geocodeResult.length > 0) {
-          const address = geocodeResult[0];
-          const area = address.sublocality || address.district || address.city || 'Unknown Area';
-          const city = address.city || address.region || '';
-          detectedAddress = city ? `${area}, ${city}` : area;
-        }
-      } catch (geocodeError) {
-        console.error('Geocoding error:', geocodeError);
-        detectedAddress = `Location: ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
-        // Show a warning but don't fail the process
-        Alert.alert(
-          'Address Lookup Failed',
-          'We detected your location but couldn\'t get the address details. Your coordinates have been saved successfully.',
-          [{ text: 'OK' }]
-        );
-      }
-      
-      // Update form data with both coordinates and address
-      updateFormData('location', coords);
-      updateFormData('detectedAddress', detectedAddress);
-      
-      Alert.alert('Success', `Location detected: ${detectedAddress}`);
-    } catch (error) {
-      console.error('Location error:', error);
-      let errorMessage = 'An unexpected error occurred while detecting your location.';
-      
-      // Check for specific error types
-      if (error.message.includes('Network')) {
-        errorMessage = 'Network error: Please check your internet connection and try again.';
-      } else if (error.message.includes('timeout')) {
-        errorMessage = 'Location detection timed out. Please try again or move to an area with better GPS signal.';
-      } else if (error.message.includes('permission')) {
-        errorMessage = 'Location permission was denied. Please enable location services in your device settings.';
-      }
-      
-      Alert.alert('Location Error', errorMessage, [{ text: 'OK' }]);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
-
-  const toggleCategory = (categoryId) => {
-    const selected = formData.selectedCategories;
-    if (selected.includes(categoryId)) {
-      updateFormData('selectedCategories', selected.filter(id => id !== categoryId));
-    } else {
-      updateFormData('selectedCategories', [...selected, categoryId]);
-    }
-  };
-
-  const completeOnboarding = async () => {
-    try {
-      setLoading(true);
-      
-      const agentData = {
-        ...formData,
-        isVerified: true,
-        isApproved: true,
-        status: 'active',
-      };
-      
-      console.log('Agent onboarding data:', agentData);
-      
-      // Get authentication token
-      const token = await SecureStore.getItemAsync('userToken');
-      console.log('🔐 Token retrieved for onboarding:', token ? `Present (${token.substring(0, 20)}...)` : 'Missing');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      
-      // Validate token format
-      if (!token.startsWith('eyJ')) {
-        console.warn('⚠️ Token does not appear to be a valid JWT:', token.substring(0, 50));
-      }
-      
-      console.log('📡 Making POST request to:', `${API_BASE_URL}/agents/create`);
-      
-      // Function to make request with retry
-      const makeRequestWithRetry = async (retries = 3) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            console.log(`🔄 Attempt ${i + 1} of ${retries}`);
-            
-            const requestPayload = {
-              name: agentData.name,
-              phone: agentData.phone,
-              address: agentData.address || 'Not specified',
-              experience: agentData.experience || '0-1 years',
-              selectedCategories: agentData.selectedCategories,
-              location: agentData.location,
-              rate_per_km: 20.0
-            };
-            
-            console.log('📤 Request payload:', JSON.stringify(requestPayload, null, 2));
-            
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-            
-            const response = await fetch(`${API_BASE_URL}/agents/create`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-              },
-              body: JSON.stringify(requestPayload),
-              signal: controller.signal,
-            });
-            
-            clearTimeout(timeoutId);
-            console.log('📡 Agent creation response status:', response.status);
-            
-            if (!response.ok) {
-              const errorText = await response.text();
-              console.error('❌ Agent creation failed - Raw response:', errorText);
-              
-              let errorData;
-              try {
-                errorData = JSON.parse(errorText);
-              } catch (parseError) {
-                console.error('❌ Failed to parse error response:', parseError);
-                throw new Error(`Server error: ${response.status} - ${errorText}`);
-              }
-              
-              console.error('❌ Agent creation failed - Parsed error:', errorData);
-              
-              // Handle specific error cases
-              if (errorData.detail && errorData.detail.includes('already has an agent profile')) {
-                // User already has an agent profile - this means onboarding was successful before
-                console.log('✅ User already has agent profile, completing onboarding locally');
-                return { message: 'Agent profile already exists' };
-              }
-              
-              throw new Error(errorData.detail || 'Failed to create agent profile');
-            }
-            
-            const agentProfile = await response.json();
-            console.log('✅ Agent profile created:', agentProfile);
-            return agentProfile;
-            
-          } catch (fetchError) {
-            console.log(`❌ Attempt ${i + 1} failed:`, fetchError.message);
-            
-            if (i === retries - 1) {
-              // Last retry failed
-              throw fetchError;
-            }
-            
-            // Wait before retry
-            await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Increasing delay
+        // Validate sub-categories for categories that require them
+        const category = categories.find(c => c.id === cachedData.primaryCategory);
+        if (category && category.has_sub_categories) {
+          if (!cachedData.selectedSubCategories || cachedData.selectedSubCategories.length === 0) {
+            Alert.alert(
+              'Missing Specializations', 
+              `Please select at least one specialization within "${category.name}" category to continue.`
+            );
+            return false;
           }
+          console.log(`✅ Selected ${cachedData.selectedSubCategories.length} specializations for ${category.name}`);
+        } else if (category) {
+          console.log(`✅ Category "${category.name}" does not require specializations`);
         }
-      };
+        break;
+      case 2:
+        if (!cachedData.profilePhoto) {
+          Alert.alert('Missing Photo', 'Please take or upload a profile photo');
+          return false;
+        }
+        break;
+      case 3:
+        if (!cachedData.kycDocumentType || !cachedData.kycDocument) {
+          Alert.alert('Missing Document', 'Please select and upload a KYC document');
+          return false;
+        }
+        break;
+      case 4:
+        if (!cachedData.selfiePhoto) {
+          Alert.alert('Missing Selfie', 'Please take a selfie for verification');
+          return false;
+        }
+        break;
+      case 5:
+        if (!cachedData.address) {
+          Alert.alert('Missing Address', 'Please provide your address');
+          return false;
+        }
+        break;
+      case 6:
+        if (!cachedData.acceptedTerms || !cachedData.acceptedPrivacy) {
+          Alert.alert('Agreement Required', 'Please accept the terms and privacy policy');
+          return false;
+        }
+        break;
+    }
+    return true;
+  };
+
+  // Final submission - uploads all data and creates agent profile
+  const handleFinalSubmit = async () => {
+    try {
+      setSubmitting(true);
       
-      // Try to create agent profile with retries
-      try {
-        await makeRequestWithRetry();
-        console.log('✅ Agent profile created successfully in backend');
-        
-        // Only complete onboarding if backend creation succeeds
-        await completeAgentOnboarding();
-        setCurrentMode('agent'); // Ensure agent mode is active after onboarding
-        
-        Alert.alert(
-          '🎉 Welcome to ClickO!',
-          'Congratulations! Your agent profile is ready.\n\n✅ Welcome bonus of ₹1000 added to your wallet!\n🎯 You can now start accepting bookings!',
-          [{ 
-            text: 'Start Earning', 
-            onPress: () => {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home' }],
-              });
+      Alert.alert(
+        'Submit Application',
+        'Are you ready to submit your agent application? This will create your agent profile.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Submit', 
+            style: 'default',
+            onPress: async () => {
+              try {
+                console.log('📤 Submitting agent onboarding data:', {
+                  ...cachedData,
+                  profilePhoto: cachedData.profilePhoto ? 'Present' : 'Missing',
+                  kycDocument: cachedData.kycDocument ? 'Present' : 'Missing',
+                  selfiePhoto: cachedData.selfiePhoto ? 'Present' : 'Missing',
+                });
+
+                // Prepare submission data
+                const submissionData = {
+                  // Personal details
+                  phone: cachedData.phone,
+                  experienceYears: cachedData.experienceYears || 0,
+                  bio: cachedData.bio || '',
+                  
+                  // Address details
+                  addressLine1: cachedData.address,
+                  addressLine2: '',
+                  city: cachedData.city || '',
+                  state: cachedData.state || '',
+                  postalCode: cachedData.postalCode || '',
+                  location: cachedData.location || '', // "lat,lng"
+                  
+                  // Category selections
+                  primaryCategoryId: cachedData.primaryCategory,
+                  subCategoryIds: cachedData.selectedSubCategories || [],
+                  
+                  // KYC details
+                  kycDocumentType: cachedData.kycDocumentType,
+                  
+                  // Image files (URIs)
+                  profilePhoto: cachedData.profilePhoto,
+                  selfiePhoto: cachedData.selfiePhoto,
+                  kycDocument: cachedData.kycDocument,
+                };
+
+                // Submit to backend
+                const result = await submitAgentOnboarding(submissionData);
+                
+                // Clear cache after successful submission
+                await SecureStore.deleteItemAsync(CACHE_KEYS.ONBOARDING_DATA);
+                await SecureStore.deleteItemAsync(CACHE_KEYS.CURRENT_STEP);
+                
+                if (result.alreadyExists) {
+                  // User already has agent profile - update local state to match backend
+                  console.log('🎯 Syncing local state: User already has agent profile');
+                  await updateUserProfile({ 
+                    agentOnboardingCompleted: true,
+                    isAgent: true
+                    // Don't force currentMode - let user choose their preferred mode
+                  });
+                  
+                  Alert.alert(
+                    'Agent Profile Found!', 
+                    'You already have an agent profile. Your account has been updated to reflect this.',
+                    [{ text: 'OK', onPress: () => navigation.goBack() }]
+                  );
+                } else {
+                  // New agent profile created - switch to agent mode since they just completed onboarding
+                  await updateUserProfile({ 
+                    agentOnboardingCompleted: true,
+                    isAgent: true,
+                    currentMode: 'agent' // OK to set agent mode for new onboarding completion
+                  });
+                  
+                  Alert.alert(
+                    'Success!', 
+                    `Your agent profile has been created successfully! Agent ID: ${result.agent_id}. Your application is ${result.status}.`,
+                    [{ text: 'OK', onPress: () => navigation.goBack() }]
+                  );
+                }
+                
+              } catch (error) {
+                console.error('❌ Submission error:', error);
+                Alert.alert(
+                  'Submission Failed', 
+                  `Failed to submit application: ${error.message}. Please check your connection and try again.`
+                );
+              } finally {
+                setSubmitting(false);
+              }
             }
-          }]
-        );
-        
-      } catch (backendError) {
-        console.error('❌ Backend agent creation failed:', backendError.message);
-        
-        Alert.alert(
-          'Connection Error',
-          'Unable to complete agent registration due to network issues.\n\nPlease check your internet connection and try again.',
-          [
-            { 
-              text: 'Try Again', 
-              onPress: () => completeOnboarding() // Retry the whole process
-            },
-            {
-              text: 'Go Back',
-              style: 'cancel',
-              onPress: () => setCurrentStep(1) // Go back to first step
-            }
-          ]
-        );
-        return; // Don't proceed with local onboarding
-      }
+          }
+        ]
+      );
+      
     } catch (error) {
-      console.error('Error completing onboarding:', error);
-      Alert.alert('Error', 'Failed to complete onboarding');
-    } finally {
-      setLoading(false);
+      console.error('Error in final submit:', error);
     }
   };
 
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
-      <ProgressBar 
-        progress={currentStep / ONBOARDING_STEPS.length} 
-        color="#2196F3" 
-        style={styles.progressBar}
-      />
       <Text style={styles.progressText}>
         Step {currentStep} of {ONBOARDING_STEPS.length}
       </Text>
-    </View>
-  );
-
-  const renderBasicInfo = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Basic Information</Text>
-      <Text style={styles.stepSubtitle}>Tell us about yourself</Text>
-      
-      <TextInput
-        label="Full Name *"
-        value={formData.name}
-        onChangeText={(text) => updateFormData('name', text)}
-        mode="outlined"
-        style={styles.input}
-        theme={{ colors: { primary: '#2196F3', text: '#FFFFFF', placeholder: '#888888', background: '#1E1E1E' }}}
-        textColor="#FFFFFF"
-        outlineColor="#555555"
-        activeOutlineColor="#2196F3"
+      <ProgressBar 
+        progress={currentStep / ONBOARDING_STEPS.length} 
+        color={colors.primary}
+        style={styles.progressBar}
       />
-      
-      <TextInput
-        label="Phone Number *"
-        value={formData.phone}
-        onChangeText={(text) => updateFormData('phone', text)}
-        mode="outlined"
-        keyboardType="phone-pad"
-        style={styles.input}
-        theme={{ colors: { primary: '#2196F3', text: '#FFFFFF', placeholder: '#888888', background: '#1E1E1E' }}}
-        textColor="#FFFFFF"
-        outlineColor="#555555"
-        activeOutlineColor="#2196F3"
-      />
-      
-      <TextInput
-        label="Email Address *"
-        value={formData.email}
-        onChangeText={(text) => updateFormData('email', text)}
-        mode="outlined"
-        keyboardType="email-address"
-        style={styles.input}
-        theme={{ colors: { primary: '#2196F3', text: '#FFFFFF', placeholder: '#888888', background: '#1E1E1E' }}}
-        textColor="#FFFFFF"
-        outlineColor="#555555"
-        activeOutlineColor="#2196F3"
-      />
-      
-      <TextInput
-        label="Address"
-        value={formData.address}
-        onChangeText={(text) => updateFormData('address', text)}
-        mode="outlined"
-        multiline
-        numberOfLines={3}
-        style={styles.input}
-        theme={{ colors: { primary: '#2196F3', text: '#FFFFFF', placeholder: '#888888', background: '#1E1E1E' }}}
-        textColor="#FFFFFF"
-        outlineColor="#555555"
-        activeOutlineColor="#2196F3"
-      />
-      
-      <TextInput
-        label="Years of Experience"
-        value={formData.experience}
-        onChangeText={(text) => updateFormData('experience', text)}
-        mode="outlined"
-        keyboardType="numeric"
-        style={styles.input}
-        theme={{ colors: { primary: '#2196F3', text: '#FFFFFF', placeholder: '#888888', background: '#1E1E1E' }}}
-        textColor="#FFFFFF"
-        outlineColor="#555555"
-        activeOutlineColor="#2196F3"
-      />
-    </View>
-  );
-
-  const renderIdentityVerification = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Identity Verification</Text>
-      <Text style={styles.stepSubtitle}>Upload your Aadhaar card for verification</Text>
-      
-      <Card style={styles.uploadCard}>
-        <Card.Content style={styles.uploadContent}>
-          <MaterialCommunityIcons 
-            name="card-account-details" 
-            size={48} 
-            color="#2196F3" 
-          />
-          <Text style={styles.uploadTitle}>Aadhaar Card Upload</Text>
-          <Text style={styles.uploadSubtitle}>
-            Upload a clear photo or PDF of your Aadhaar card
-          </Text>
-          
-          {formData.aadhaarDocument && (
-            <View style={styles.documentInfo}>
-              <MaterialCommunityIcons name="check-circle" size={24} color="#4CAF50" />
-              <Text style={styles.documentName}>
-                {formData.aadhaarDocument.name}
-              </Text>
-            </View>
-          )}
-          
-          <Button 
-            mode="contained" 
-            onPress={pickDocument}
-            icon="upload"
-            style={styles.uploadButton}
-          >
-            {formData.aadhaarDocument ? 'Change Document' : 'Upload Document'}
-          </Button>
-        </Card.Content>
-      </Card>
-    </View>
-  );
-
-  const renderLocationSetup = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Location Setup</Text>
-      <Text style={styles.stepSubtitle}>Enable location for nearby bookings</Text>
-      
-      <Card style={styles.locationCard}>
-        <Card.Content style={styles.locationContent}>
-          <MaterialCommunityIcons 
-            name="map-marker" 
-            size={48} 
-            color="#FF5722" 
-          />
-          <Text style={styles.locationTitle}>Location Access</Text>
-          <Text style={styles.locationSubtitle}>
-            {formData.location 
-              ? "Location detected successfully! You can update it if needed." 
-              : "We need your location to show you nearby booking requests"}
-          </Text>
-          
-          {locationLoading && (
-            <View style={styles.locationInfo}>
-              <ActivityIndicator size={20} color="#2196F3" />
-              <Text style={styles.locationText}>
-                🔍 Detecting your location...
-              </Text>
-            </View>
-          )}
-          
-          {formData.location && !locationLoading && (
-            <View style={styles.locationInfo}>
-              <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-              <View style={styles.locationTextContainer}>
-                <Text style={styles.locationText}>
-                  📍 {formData.detectedAddress || 'Location coordinates saved'}
-                </Text>
-                <Text style={styles.locationHint}>
-                  Tap "Update Location" below to re-detect if this is incorrect
-                </Text>
-              </View>
-            </View>
-          )}
-          
-          {!formData.location && !locationLoading && (
-            <View style={styles.locationInfo}>
-              <MaterialCommunityIcons name="information" size={20} color="#2196F3" />
-              <Text style={styles.locationHint}>
-                Tap the button below to detect your current location
-              </Text>
-            </View>
-          )}
-          
-          <Button 
-            mode={formData.location ? "outlined" : "contained"}
-            onPress={requestLocationPermission}
-            icon={locationLoading ? undefined : formData.location ? "refresh" : "map-marker"}
-            loading={locationLoading}
-            disabled={locationLoading}
-            style={styles.locationButton}
-          >
-            {locationLoading 
-              ? 'Detecting Location...' 
-              : formData.location 
-                ? 'Re-detect Location' 
-                : 'Detect My Location'
-            }
-          </Button>
-        </Card.Content>
-      </Card>
-    </View>
-  );
-
-  const renderCategorySelection = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Service Categories</Text>
-      <Text style={styles.stepSubtitle}>Select the services you provide</Text>
-      
-      <View style={styles.categoriesContainer}>
-        {categories.map((category) => (
-          <Chip
-            key={category.id}
-            selected={formData.selectedCategories.includes(category.id)}
-            onPress={() => toggleCategory(category.id)}
-            style={[
-              styles.categoryChip,
-              formData.selectedCategories.includes(category.id) && styles.selectedChip
-            ]}
-            textStyle={formData.selectedCategories.includes(category.id) && styles.selectedChipText}
-          >
-            {category.name}
-          </Chip>
-        ))}
-      </View>
-      
-      <Text style={styles.selectionCount}>
-        {formData.selectedCategories.length} categories selected
+      <Text style={styles.stepTitle}>
+        {ONBOARDING_STEPS[currentStep - 1]?.title}
       </Text>
     </View>
   );
 
-  const renderComplete = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.completeContainer}>
-        <MaterialCommunityIcons name="check-circle" size={80} color="#4CAF50" />
-        <Text style={styles.completeTitle}>All Set!</Text>
-        <Text style={styles.completeSubtitle}>
-          Your agent profile is ready. You can now start accepting bookings and earning money!
+  const renderStep1BasicInfo = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Basic Information</Text>
+        
+        <PhoneInput
+          label="Phone Number *"
+          value={cachedData.phone}
+          onChangeText={(phone) => saveCachedData({ phone })}
+          style={styles.input}
+        />
+
+        <TextInput
+          label="Years of Experience *"
+          value={cachedData.experienceYears}
+          onChangeText={(experienceYears) => saveCachedData({ experienceYears })}
+          keyboardType="numeric"
+          style={styles.input}
+        />
+
+        <View style={styles.categorySection}>
+          <Text style={styles.sectionTitle}>Primary Service Category *</Text>
+          <Text style={styles.sectionDescription}>
+            Select your main area of expertise
+          </Text>
+          
+          <View style={styles.categoriesContainer}>
+            {categories.map((category) => (
+              <Chip
+                key={category.id}
+                style={[
+                  styles.categoryChip,
+                  cachedData.primaryCategory === category.id && styles.selectedCategoryChip
+                ]}
+                selected={cachedData.primaryCategory === category.id}
+                onPress={() => {
+                  // Clear sub-categories when changing primary category
+                  saveCachedData({ 
+                    primaryCategory: category.id,
+                    selectedSubCategories: [] // Reset sub-categories for new category
+                  });
+                  loadSubCategories(category.id);
+                }}
+                mode={cachedData.primaryCategory === category.id ? 'flat' : 'outlined'}
+              >
+                {category.name}
+              </Chip>
+            ))}
+          </View>
+          
+          {cachedData.primaryCategory && (
+            <Text style={styles.selectedCategoryText}>
+              Primary: {categories.find(c => c.id === cachedData.primaryCategory)?.name}
+            </Text>
+          )}
+
+          {/* Sub-categories selection for primary category */}
+          {cachedData.primaryCategory && subCategories[cachedData.primaryCategory] && (
+            <View style={styles.categorySection}>
+              <Text style={styles.sectionTitle}>Select Your Specializations</Text>
+              <Text style={styles.sectionDescription}>
+                Choose specific services you provide within {categories.find(c => c.id === cachedData.primaryCategory)?.name}
+              </Text>
+              
+              <View style={styles.categoriesContainer}>
+                {subCategories[cachedData.primaryCategory].map((subCategory) => (
+                  <Chip
+                    key={subCategory.id}
+                    style={[
+                      styles.categoryChip,
+                      (cachedData.selectedSubCategories || []).includes(subCategory.id) && styles.selectedCategoryChip
+                    ]}
+                    selected={(cachedData.selectedSubCategories || []).includes(subCategory.id)}
+                    onPress={() => {
+                      const currentSelection = cachedData.selectedSubCategories || [];
+                      const newSelection = currentSelection.includes(subCategory.id)
+                        ? currentSelection.filter(id => id !== subCategory.id)
+                        : [...currentSelection, subCategory.id];
+                      saveCachedData({ selectedSubCategories: newSelection });
+                    }}
+                    mode={(cachedData.selectedSubCategories || []).includes(subCategory.id) ? 'flat' : 'outlined'}
+                  >
+                    {subCategory.name}
+                  </Chip>
+                ))}
+              </View>
+              
+              {(cachedData.selectedSubCategories || []).length > 0 && (
+                <Text style={styles.selectionCount}>
+                  {(cachedData.selectedSubCategories || []).length} specializations selected
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      </Card.Content>
+    </Card>
+  );
+
+  const renderStep2ProfilePhoto = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Profile Photo</Text>
+        <Text style={styles.sectionDescription}>
+          Upload a clear photo of yourself. This will be shown to users.
         </Text>
         
-        <View style={styles.summaryContainer}>
-          <Text style={styles.summaryTitle}>Profile Summary:</Text>
-          <Text style={styles.summaryItem}>• Name: {formData.name}</Text>
-          <Text style={styles.summaryItem}>• Phone: {formData.phone}</Text>
-          <Text style={styles.summaryItem}>• Categories: {formData.selectedCategories.length} selected</Text>
-          <Text style={styles.summaryItem}>• Location: {formData.location ? 'Enabled' : 'Disabled'}</Text>
-          <Text style={styles.summaryItem}>• Identity: Verified ✓</Text>
+        <PhotoCapture
+          value={cachedData.profilePhoto}
+          onImageTaken={(uri) => saveCachedData({ profilePhoto: uri })}
+          placeholder="Take Profile Photo"
+          type="profile"
+          cacheOnly={true}
+        />
+      </Card.Content>
+    </Card>
+  );
+
+  const renderStep3KYCDocument = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Identity Verification</Text>
+        <Text style={styles.sectionDescription}>
+          Upload a government-issued ID for verification.
+        </Text>
+
+        <View style={styles.documentTypeContainer}>
+          {KYC_DOCUMENT_TYPES.map((docType) => (
+            <Chip
+              key={docType.value}
+              mode={cachedData.kycDocumentType === docType.value ? 'flat' : 'outlined'}
+              selected={cachedData.kycDocumentType === docType.value}
+              onPress={() => saveCachedData({ kycDocumentType: docType.value })}
+              icon={docType.icon}
+              style={styles.documentTypeChip}
+            >
+              {docType.label}
+            </Chip>
+          ))}
         </View>
-      </View>
-    </View>
+
+        {cachedData.kycDocumentType && (
+          <PhotoCapture
+            value={cachedData.kycDocument}
+            onImageTaken={(uri) => saveCachedData({ kycDocument: uri })}
+            placeholder={`Upload ${KYC_DOCUMENT_TYPES.find(d => d.value === cachedData.kycDocumentType)?.label}`}
+            type="document"
+            cacheOnly={true}
+          />
+        )}
+      </Card.Content>
+    </Card>
+  );
+
+  const renderStep4SelfieVerification = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Selfie Verification</Text>
+        <Text style={styles.sectionDescription}>
+          Take a clear selfie for identity verification. Make sure your face is clearly visible.
+        </Text>
+        
+        <PhotoCapture
+          value={cachedData.selfiePhoto}
+          onImageTaken={(uri) => saveCachedData({ selfiePhoto: uri })}
+          placeholder="Take Selfie"
+          type="selfie"
+          cacheOnly={true}
+        />
+      </Card.Content>
+    </Card>
+  );
+
+  const renderStep5LocationSetup = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Service Location</Text>
+        <Text style={styles.sectionDescription}>
+          Set your base location where you provide services.
+        </Text>
+
+        <AddressAutocomplete
+          label="Service Address *"
+          value={cachedData.address}
+          onAddressSelect={(address, coordinates) => {
+            saveCachedData({ 
+              address: address,
+              coordinates: coordinates 
+            });
+          }}
+          style={styles.input}
+        />
+
+        {selectedLocation && (
+          <Button
+            mode="outlined"
+            onPress={() => {
+              saveCachedData({
+                address: selectedLocation.address,
+                coordinates: selectedLocation.coordinates
+              });
+            }}
+            style={styles.useCurrentLocationButton}
+          >
+            Use Current Location: {selectedLocation.area}
+          </Button>
+        )}
+      </Card.Content>
+    </Card>
+  );
+
+
+
+  const renderStep7TermsAgreement = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Terms & Agreement</Text>
+        
+        <View style={styles.agreementContainer}>
+          <View style={styles.checkboxRow}>
+            <Checkbox
+              status={cachedData.acceptedTerms ? 'checked' : 'unchecked'}
+              onPress={() => saveCachedData({ acceptedTerms: !cachedData.acceptedTerms })}
+              color={colors.primary}
+              uncheckedColor={colors.primary}
+            />
+            <Text style={styles.agreementText}>
+              I accept the{' '}
+              <Text 
+                style={styles.linkText}
+                onPress={() => navigation.navigate('TermsOfService')}
+              >
+                Terms of Service
+              </Text>
+            </Text>
+          </View>
+
+          <View style={styles.checkboxRow}>
+            <Checkbox
+              status={cachedData.acceptedPrivacy ? 'checked' : 'unchecked'}
+              onPress={() => saveCachedData({ acceptedPrivacy: !cachedData.acceptedPrivacy })}
+              color={colors.primary}
+              uncheckedColor={colors.primary}
+            />
+            <Text style={styles.agreementText}>
+              I accept the{' '}
+              <Text 
+                style={styles.linkText}
+                onPress={() => navigation.navigate('PrivacyPolicy')}
+              >
+                Privacy Policy
+              </Text>
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.agreementNotice}>
+          <MaterialCommunityIcons name="information" size={24} color={colors.primary} />
+          <Text style={styles.agreementNoticeText}>
+            By accepting these terms, you agree to provide services as an independent contractor 
+            through the ClickO platform. All service pricing will be negotiated directly with customers.
+          </Text>
+        </View>
+      </Card.Content>
+    </Card>
+  );
+
+  const renderStep8FinalSubmission = () => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Review & Submit</Text>
+        <Text style={styles.sectionDescription}>
+          Please review your information before final submission.
+        </Text>
+
+        <View style={styles.reviewContainer}>
+          <View style={styles.reviewItem}>
+            <Text style={styles.reviewLabel}>Phone:</Text>
+            <Text style={styles.reviewValue}>{cachedData.phone}</Text>
+          </View>
+          
+          <View style={styles.reviewItem}>
+            <Text style={styles.reviewLabel}>Experience:</Text>
+            <Text style={styles.reviewValue}>{cachedData.experienceYears} years</Text>
+          </View>
+          
+          <View style={styles.reviewItem}>
+            <Text style={styles.reviewLabel}>Primary Category:</Text>
+            <Text style={styles.reviewValue}>
+              {categories.find(c => c.id === cachedData.primaryCategory)?.name || 'Not selected'}
+            </Text>
+          </View>
+          
+          {cachedData.selectedSubCategories && cachedData.selectedSubCategories.length > 0 && (
+            <View style={styles.reviewItem}>
+              <Text style={styles.reviewLabel}>Specializations:</Text>
+              <Text style={styles.reviewValue}>
+                {cachedData.selectedSubCategories.length} selected
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.reviewItem}>
+            <Text style={styles.reviewLabel}>Documents:</Text>
+            <Text style={styles.reviewValue}>
+              {(cachedData.profilePhoto && cachedData.profilePhoto !== null) ? '✅' : '❌'} Profile Photo{'\n'}
+              {(cachedData.kycDocument && cachedData.kycDocument !== null) ? '✅' : '❌'} KYC Document{'\n'}
+              {(cachedData.selfiePhoto && cachedData.selfiePhoto !== null) ? '✅' : '❌'} Selfie
+            </Text>
+          </View>
+        </View>
+
+        <Button
+          mode="contained"
+          onPress={handleFinalSubmit}
+          disabled={submitting}
+          loading={submitting}
+          style={styles.submitButton}
+        >
+          {submitting ? 'Submitting Application...' : 'Submit Agent Application'}
+        </Button>
+      </Card.Content>
+    </Card>
   );
 
   const renderCurrentStep = () => {
     switch (currentStep) {
-      case 1: return renderBasicInfo();
-      case 2: return renderIdentityVerification();
-      case 3: return renderLocationSetup();
-      case 4: return renderCategorySelection();
-      case 5: return renderComplete();
-      default: return renderBasicInfo();
+      case 1: return renderStep1BasicInfo();
+      case 2: return renderStep2ProfilePhoto();
+      case 3: return renderStep3KYCDocument();
+      case 4: return renderStep4SelfieVerification();
+      case 5: return renderStep5LocationSetup();
+      case 6: return renderStep7TermsAgreement();
+      case 7: return renderStep8FinalSubmission();
+      default: return null;
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#121212" />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      
       <LinearGradient
-        colors={['#121212', '#1E1E1E']}
+        colors={[colors.primary, colors.secondary]}
         style={styles.header}
       >
-        <View style={styles.headerTop}>
+        <View style={styles.headerContent}>
           <IconButton
-            icon="close"
-            iconColor="#FFFFFF"
+            icon="arrow-left"
+            iconColor="#fff"
             size={24}
-            onPress={handleClose}
-            style={styles.closeButton}
+            onPress={handleBackPress}
           />
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Agent Onboarding</Text>
-            <Text style={styles.headerSubtitle}>Join ClickO as a Service Provider</Text>
-          </View>
-          <View style={styles.placeholder} />
+          <Text style={styles.headerTitle}>Agent Onboarding</Text>
         </View>
+        {renderProgressBar()}
       </LinearGradient>
-      
-      {renderProgressBar()}
-      
+
       <KeyboardAvoidingView 
-        style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.content}
       >
-        <ScrollView 
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView showsVerticalScrollIndicator={false}>
           {renderCurrentStep()}
         </ScrollView>
-        
-        <View style={styles.buttonContainer}>
+
+        <View style={styles.navigationButtons}>
           {currentStep > 1 && (
-            <Button 
-              mode="outlined" 
-              onPress={handleBack}
-              style={styles.backButton}
-              labelStyle={{ color: '#CCCCCC' }}
-              theme={{ colors: { outline: '#555555' }}}
+            <Button
+              mode="outlined"
+              onPress={handlePrevious}
+              style={styles.navButton}
             >
-              Back
+              Previous
             </Button>
           )}
           
-          <Button 
-            mode="contained" 
-            onPress={handleNext}
-            loading={loading}
-            style={styles.nextButton}
-            labelStyle={{ color: '#FFFFFF' }}
-            theme={{ colors: { primary: '#2196F3' }}}
-          >
-            {currentStep === ONBOARDING_STEPS.length ? 'Complete' : 'Next'}
-          </Button>
+          {currentStep < ONBOARDING_STEPS.length && (
+            <Button
+              mode="contained"
+              onPress={handleNext}
+              style={styles.navButton}
+            >
+              Next
+            </Button>
+          )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -818,231 +927,182 @@ export default function AgentOnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#f5f5f5',
   },
   header: {
-    padding: 20,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-  closeButton: {
-    margin: 0,
+    paddingBottom: 20,
   },
   headerContent: {
-    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  placeholder: {
-    width: 40,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: '#fff',
+    marginLeft: 16,
   },
   progressContainer: {
-    padding: 20,
-    backgroundColor: '#1E1E1E',
-  },
-  progressBar: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#333333',
+    paddingHorizontal: 20,
+    paddingTop: 10,
   },
   progressText: {
-    textAlign: 'center',
-    marginTop: 8,
+    color: '#fff',
     fontSize: 14,
-    color: '#CCCCCC',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginBottom: 8,
+  },
+  stepTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   content: {
     flex: 1,
+    padding: 16,
   },
-  scrollView: {
-    flex: 1,
+  card: {
+    marginBottom: 16,
+    elevation: 2,
   },
-  stepContainer: {
-    padding: 20,
-  },
-  stepTitle: {
-    fontSize: 24,
+  sectionTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
+    color: colors.primary,
     marginBottom: 8,
-    color: '#FFFFFF',
   },
-  stepSubtitle: {
-    fontSize: 16,
-    color: '#CCCCCC',
-    marginBottom: 24,
+  sectionDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 20,
   },
   input: {
-    marginBottom: 16,
-    backgroundColor: '#1E1E1E',
+    marginBottom: 12,
   },
-  uploadCard: {
-    marginTop: 16,
-    backgroundColor: '#1E1E1E',
-  },
-  uploadContent: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  uploadTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 12,
-    marginBottom: 8,
-    color: '#FFFFFF',
-  },
-  uploadSubtitle: {
-    fontSize: 14,
-    color: '#CCCCCC',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  documentInfo: {
+  documentTypeContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
     marginBottom: 16,
   },
-  documentName: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#4CAF50',
-  },
-  uploadButton: {
-    marginTop: 8,
-    backgroundColor: '#2196F3',
-  },
-  locationCard: {
-    marginTop: 16,
-    backgroundColor: '#1E1E1E',
-  },
-  locationContent: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  locationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 12,
-    marginBottom: 8,
-    color: '#FFFFFF',
-  },
-  locationSubtitle: {
-    fontSize: 14,
-    color: '#CCCCCC',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 8,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: '500',
-  },
-  locationTextContainer: {
-    marginLeft: 8,
-    flex: 1,
-  },
-  locationHint: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#CCCCCC',
-    fontStyle: 'italic',
-  },
-  locationButton: {
-    marginTop: 8,
-    backgroundColor: '#FF5722',
+  documentTypeChip: {
+    margin: 4,
   },
   categoriesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 16,
   },
   categoryChip: {
     margin: 4,
-    backgroundColor: '#333333',
   },
-  selectedChip: {
-    backgroundColor: '#2196F3',
+  useCurrentLocationButton: {
+    marginTop: 12,
   },
-  selectedChipText: {
-    color: 'white',
+  agreementContainer: {
+    marginBottom: 20,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  agreementText: {
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  linkText: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
+  },
+  agreementNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f0f8ff',
+    padding: 12,
+    borderRadius: 8,
+  },
+  agreementNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+    lineHeight: 18,
+  },
+  reviewContainer: {
+    marginBottom: 20,
+  },
+  reviewItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  reviewLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    flex: 1,
+  },
+  reviewValue: {
+    fontSize: 14,
+    color: '#666',
+    flex: 2,
+    textAlign: 'right',
+  },
+  submitButton: {
+    marginTop: 16,
+  },
+  navigationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+  },
+  categorySection: {
+    marginVertical: 16,
+  },
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginVertical: 8,
+  },
+  categoryChip: {
+    marginBottom: 8,
+  },
+  selectedCategoryChip: {
+    backgroundColor: colors.primary,
+  },
+  selectedCategoryText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: 'bold',
+    marginTop: 8,
   },
   selectionCount: {
+    fontSize: 12,
+    color: '#666',
     textAlign: 'center',
-    marginTop: 16,
-    fontSize: 14,
-    color: '#CCCCCC',
+    marginTop: 8,
+    backgroundColor: '#fff',
+    elevation: 4,
   },
-  completeContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  completeTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginTop: 16,
-    marginBottom: 8,
-    color: '#4CAF50',
-  },
-  completeSubtitle: {
-    fontSize: 16,
-    color: '#CCCCCC',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  summaryContainer: {
-    backgroundColor: '#1E1E1E',
-    padding: 20,
-    borderRadius: 12,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#333333',
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#FFFFFF',
-  },
-  summaryItem: {
-    fontSize: 14,
-    marginBottom: 6,
-    color: '#CCCCCC',
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    padding: 20,
-    backgroundColor: '#1E1E1E',
-    borderTopWidth: 1,
-    borderTopColor: '#333333',
-  },
-  backButton: {
+  navButton: {
     flex: 1,
-    marginRight: 8,
-    borderColor: '#555555',
-  },
-  nextButton: {
-    flex: 2,
-    marginLeft: 8,
-    backgroundColor: '#2196F3',
+    marginHorizontal: 8,
   },
 });

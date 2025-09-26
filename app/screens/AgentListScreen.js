@@ -135,12 +135,16 @@ export default function AgentListScreen() {
           onPress={() => navigation.navigate('Booking', { 
             agentId: item.id, 
             agentName: item.name,
-            categoryId: categoryId 
+            categoryId: categoryId,
+            visitCharge: item.distance_km ? Math.round(item.distance_km * item.rate_per_km) : item.rate_per_km * 2 // Default 2km if no distance
           })}
           style={styles.bookButton}
           disabled={!item.is_online}
         >
-          {item.is_online ? 'Book Now' : 'Unavailable'}
+          {item.is_online 
+            ? `Pay ₹${item.distance_km ? Math.round(item.distance_km * item.rate_per_km) : Math.round(item.rate_per_km * 2)} Visit Charge` 
+            : 'Unavailable'
+          }
         </Button>
       </Card.Actions>
     </Card>
