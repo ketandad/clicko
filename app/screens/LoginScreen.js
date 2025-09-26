@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, Image, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, Image, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { TextInput, Button, ActivityIndicator } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
@@ -14,7 +14,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigation = useNavigation();
-  const { login } = useAuth();
+  const { login, clearAllData } = useAuth();
 
   // Simple API test function
   const testApiConnection = async () => {
@@ -49,6 +49,29 @@ export default function LoginScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Developer function to clear cached authentication
+  const clearAppCache = async () => {
+    Alert.alert(
+      'Clear App Cache',
+      'This will clear all cached authentication data. Use this when the database has been cleared but the app still shows old user data.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Cache',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearAllData();
+              Alert.alert('Success', 'App cache cleared! The app is now in fresh state.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to clear cache: ' + error.message);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleLogin = async () => {
@@ -150,6 +173,15 @@ export default function LoginScreen() {
           >
             🧪 Test API Connection
           </Button>
+
+          <Button
+            mode="outlined"
+            onPress={clearAppCache}
+            style={[styles.button, styles.clearCacheButton]}
+            icon="delete"
+          >
+            🗑️ Clear App Cache (Dev)
+          </Button>
           
           <View style={styles.registerContainer}>
             <Text style={styles.registerText}>Don't have an account? </Text>
@@ -212,6 +244,10 @@ const styles = StyleSheet.create({
   },
   testButton: {
     borderColor: colors.primary,
+    borderWidth: 2,
+  },
+  clearCacheButton: {
+    borderColor: '#DC2626',
     borderWidth: 2,
   },
   registerContainer: {

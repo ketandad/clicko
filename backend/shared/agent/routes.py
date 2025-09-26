@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 from ..database import get_db
 from ..auth.jwt import get_current_user
-from ..user.models import User, Agent, Category, AgentCategory
+from ..user.models import User, Agent, Category, AgentCategory, SubCategory, AgentSubCategory, AgentServicePricing
 from pydantic import BaseModel
 import sqlalchemy as sa
 from sqlalchemy.sql.expression import func
@@ -33,19 +34,82 @@ class AgentProfileResponse(BaseModel):
     total_ratings: int
     kyc_status: str
     categories: List[str] = []
+    # Enhanced profile fields
+    profile_photo_url: Optional[str] = None
+    selfie_verification_url: Optional[str] = None
+    formatted_phone: Optional[str] = None
+    bio: Optional[str] = None
+    experience_years: Optional[int] = None
+    # Structured address
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    google_place_id: Optional[str] = None
 
 class CreateAgentRequest(BaseModel):
+    # Basic info (pre-filled from user profile)
     name: str
     phone: str
-    address: str
-    experience: str
+    formatted_phone: Optional[str] = None
+    # Structured address fields
+    address: Optional[str] = None  # Legacy field for backward compatibility
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = "India"
+    google_place_id: Optional[str] = None
+    # Enhanced fields
+    experience: Optional[str] = "0-1 years"
+    experience_years: Optional[int] = 0
+    bio: Optional[str] = None
+    profile_photo_url: Optional[str] = None
+    selfie_verification_url: Optional[str] = None
+    # Service details
     selectedCategories: List[int]
+    selectedSubCategories: Optional[List[int]] = []
     location: dict
     rate_per_km: Optional[float] = 20.0
 
 class LocationRequest(BaseModel):
     latitude: float
     longitude: float
+
+# Agent Service Pricing Models
+class ServicePricingCreate(BaseModel):
+    sub_category_id: int
+    price_type: str = "fixed"  # fixed, hourly, per_visit, range
+    base_price: float
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    description: Optional[str] = None
+
+class ServicePricingUpdate(BaseModel):
+    price_type: Optional[str] = None
+    base_price: Optional[float] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class ServicePricingResponse(BaseModel):
+    id: int
+    agent_id: int
+    sub_category_id: int
+    sub_category_name: str
+    category_name: str
+    price_type: str
+    base_price: float
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    description: Optional[str] = None
+    is_active: bool
+    created_at: str
+    updated_at: str
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -305,6 +369,635 @@ async def get_agent_stats(
         avg_rating=agent.avg_rating
     )
 
+# ===== AGENT SUBCATEGORY MANAGEMENT =====
+
+class SubCategoryResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    icon_url: Optional[str] = None
+    category_id: int
+    category_name: str
+    has_pricing: bool = False
+    pricing: Optional[ServicePricingResponse] = None
+
+class AgentSubCategoryRequest(BaseModel):
+    sub_category_id: int
+
+@router.get("/subcategories", response_model=List[SubCategoryResponse])
+def get_agent_subcategories(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all subcategories assigned to the current agent"""
+    print(f"DEBUG: get_agent_subcategories called for user {current_user.id}")
+    print(f"DEBUG: Endpoint reached successfully!")
+    print(f"DEBUG: current_user type: {type(current_user)}")
+    print(f"DEBUG: db session type: {type(db)}")
+    
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        print(f"DEBUG: User {current_user.id} is not an agent")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    print(f"DEBUG: Found agent {agent.id} for user {current_user.id}")
+    
+    # Get agent's subcategories with their categories and pricing info
+    subcategories = db.query(
+        SubCategory.id,
+        SubCategory.name,
+        SubCategory.description,
+        SubCategory.icon_url,
+        SubCategory.category_id,
+        Category.name.label('category_name')
+    ).join(
+        AgentSubCategory, AgentSubCategory.sub_category_id == SubCategory.id
+    ).join(
+        Category, SubCategory.category_id == Category.id
+    ).filter(
+        AgentSubCategory.agent_id == agent.id
+    ).all()
+    
+    result = []
+    for subcat in subcategories:
+        # Check if agent has pricing for this subcategory
+        pricing = db.query(AgentServicePricing).filter(
+            AgentServicePricing.agent_id == agent.id,
+            AgentServicePricing.sub_category_id == subcat.id
+        ).first()
+        
+        pricing_response = None
+        if pricing:
+            pricing_response = ServicePricingResponse(
+                id=pricing.id,
+                agent_id=pricing.agent_id,
+                sub_category_id=pricing.sub_category_id,
+                sub_category_name=subcat.name,
+                category_name=subcat.category_name,
+                price_type=pricing.price_type,
+                base_price=pricing.base_price,
+                min_price=pricing.min_price,
+                max_price=pricing.max_price,
+                description=pricing.description,
+                is_active=pricing.is_active,
+                created_at=pricing.created_at.isoformat() if pricing.created_at else "",
+                updated_at=pricing.updated_at.isoformat() if pricing.updated_at else ""
+            )
+        
+        result.append(SubCategoryResponse(
+            id=subcat.id,
+            name=subcat.name,
+            description=subcat.description,
+            icon_url=subcat.icon_url,
+            category_id=subcat.category_id,
+            category_name=subcat.category_name,
+            has_pricing=pricing is not None,
+            pricing=pricing_response
+        ))
+    
+    return result
+
+@router.post("/subcategories")
+def add_agent_subcategory(
+    request: AgentSubCategoryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add a subcategory to the agent's service list"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Verify subcategory exists
+    subcategory = db.query(SubCategory).filter(SubCategory.id == request.sub_category_id).first()
+    if not subcategory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subcategory not found"
+        )
+    
+    # Check if agent already has this subcategory
+    existing = db.query(AgentSubCategory).filter(
+        AgentSubCategory.agent_id == agent.id,
+        AgentSubCategory.sub_category_id == request.sub_category_id
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent already provides this service"
+        )
+    
+    # Add subcategory to agent
+    agent_subcategory = AgentSubCategory(
+        agent_id=agent.id,
+        sub_category_id=request.sub_category_id
+    )
+    db.add(agent_subcategory)
+    db.commit()
+    
+    return {"success": True, "message": "Subcategory added successfully"}
+
+@router.delete("/subcategories/{sub_category_id}")
+def remove_agent_subcategory(
+    sub_category_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Remove a subcategory from the agent's service list"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Find and remove the association
+    agent_subcategory = db.query(AgentSubCategory).filter(
+        AgentSubCategory.agent_id == agent.id,
+        AgentSubCategory.sub_category_id == sub_category_id
+    ).first()
+    
+    if not agent_subcategory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent doesn't provide this service"
+        )
+    
+    # Also remove any pricing for this subcategory
+    pricing = db.query(AgentServicePricing).filter(
+        AgentServicePricing.agent_id == agent.id,
+        AgentServicePricing.sub_category_id == sub_category_id
+    ).first()
+    
+    if pricing:
+        db.delete(pricing)
+    
+    db.delete(agent_subcategory)
+    db.commit()
+    
+    return {"success": True, "message": "Subcategory removed successfully"}
+
+@router.get("/available-subcategories", response_model=List[SubCategoryResponse])
+def get_available_subcategories(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all available subcategories that the agent can add to their services"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Get agent's current subcategories
+    agent_subcategories = db.query(AgentSubCategory.sub_category_id).filter(
+        AgentSubCategory.agent_id == agent.id
+    ).all()
+    agent_subcat_ids = [asc.sub_category_id for asc in agent_subcategories]
+    
+    # Get agent's selected categories during onboarding
+    agent_categories = db.query(AgentCategory.category_id).filter(
+        AgentCategory.agent_id == agent.id
+    ).all()
+    agent_category_ids = [ac.category_id for ac in agent_categories]
+    
+    if not agent_category_ids:
+        # If agent has no categories selected, return empty list
+        return []
+    
+    # Get subcategories from agent's categories that are not already assigned
+    available_subcategories = db.query(
+        SubCategory.id,
+        SubCategory.name,
+        SubCategory.description,
+        SubCategory.icon_url,
+        SubCategory.category_id,
+        Category.name.label('category_name')
+    ).join(
+        Category, SubCategory.category_id == Category.id
+    ).filter(
+        SubCategory.category_id.in_(agent_category_ids),  # Only from agent's categories
+        ~SubCategory.id.in_(agent_subcat_ids)  # Not already assigned
+    ).all()
+    
+    result = []
+    for subcat in available_subcategories:
+        result.append(SubCategoryResponse(
+            id=subcat.id,
+            name=subcat.name,
+            description=subcat.description,
+            icon_url=subcat.icon_url,
+            category_id=subcat.category_id,
+            category_name=subcat.category_name,
+            has_pricing=False,  # Not assigned yet, so no pricing
+            pricing=None
+        ))
+    
+    return result
+
+# Response model for agent categories
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    icon_url: Optional[str] = None
+
+@router.get("/categories", response_model=List[CategoryResponse])
+def get_agent_categories(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get main categories assigned to the current agent (fallback when no subcategories)"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Get agent's main categories
+    categories = db.query(
+        Category.id,
+        Category.name,
+        Category.description,
+        Category.icon_url
+    ).join(
+        AgentCategory, AgentCategory.category_id == Category.id
+    ).filter(
+        AgentCategory.agent_id == agent.id
+    ).all()
+    
+    result = []
+    for cat in categories:
+        result.append(CategoryResponse(
+            id=cat.id,
+            name=cat.name,
+            description=cat.description,
+            icon_url=cat.icon_url
+        ))
+    
+    return result
+
+# Agent Category Management
+@router.get("/available-categories", response_model=List[CategoryResponse])
+def get_available_categories(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all available categories for agents to choose from"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Get all categories that the agent hasn't selected yet
+    assigned_category_ids = db.query(AgentCategory.category_id).filter(
+        AgentCategory.agent_id == agent.id
+    ).subquery()
+    
+    available_categories = db.query(Category).filter(
+        ~Category.id.in_(assigned_category_ids)
+    ).all()
+    
+    result = []
+    for category in available_categories:
+        result.append(CategoryResponse(
+            id=category.id,
+            name=category.name,
+            description=category.description,
+            icon_url=category.icon_url
+        ))
+    
+    return result
+
+@router.post("/categories/{category_id}")
+async def add_agent_category(
+    category_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add a category to agent's services"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Check if category exists
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found"
+        )
+    
+    # Check if already assigned
+    existing = db.query(AgentCategory).filter(
+        AgentCategory.agent_id == agent.id,
+        AgentCategory.category_id == category_id
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category already assigned to agent"
+        )
+    
+    # Add category to agent
+    agent_category = AgentCategory(
+        agent_id=agent.id,
+        category_id=category_id
+    )
+    db.add(agent_category)
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"Category '{category.name}' added successfully",
+        "category": CategoryResponse(
+            id=category.id,
+            name=category.name,
+            description=category.description,
+            icon_url=category.icon_url
+        )
+    }
+
+@router.delete("/categories/{category_id}")
+async def remove_agent_category(
+    category_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Remove a category from agent's services"""
+    # Check if user is an agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not an agent"
+        )
+    
+    # Find and remove the category assignment
+    agent_category = db.query(AgentCategory).filter(
+        AgentCategory.agent_id == agent.id,
+        AgentCategory.category_id == category_id
+    ).first()
+    
+    if not agent_category:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not assigned to agent"
+        )
+    
+    # Check if agent has subcategories in this category
+    subcategories_count = db.query(AgentSubCategory).join(
+        SubCategory, AgentSubCategory.sub_category_id == SubCategory.id
+    ).filter(
+        AgentSubCategory.agent_id == agent.id,
+        SubCategory.category_id == category_id
+    ).count()
+    
+    if subcategories_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot remove category. Agent has {subcategories_count} subcategories in this category. Remove subcategories first."
+        )
+    
+    db.delete(agent_category)
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Category removed successfully"
+    }
+
+# ===== AGENT SERVICE PRICING ENDPOINTS (moved before {agent_id} route) =====
+
+@router.get("/service-pricing", response_model=List[ServicePricingResponse])
+async def get_agent_service_pricing(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all service pricing for the current agent"""
+    # Get agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent profile not found"
+        )
+    
+    # Get all pricing with subcategory and category names
+    pricing_data = db.query(
+        AgentServicePricing,
+        SubCategory.name.label('sub_category_name'),
+        Category.name.label('category_name')
+    ).join(
+        SubCategory, AgentServicePricing.sub_category_id == SubCategory.id
+    ).join(
+        Category, SubCategory.category_id == Category.id
+    ).filter(
+        AgentServicePricing.agent_id == agent.id
+    ).all()
+    
+    result = []
+    for pricing, sub_category_name, category_name in pricing_data:
+        result.append(ServicePricingResponse(
+            id=pricing.id,
+            agent_id=pricing.agent_id,
+            sub_category_id=pricing.sub_category_id,
+            sub_category_name=sub_category_name,
+            category_name=category_name,
+            price_type=pricing.price_type,
+            base_price=pricing.base_price,
+            min_price=pricing.min_price,
+            max_price=pricing.max_price,
+            description=pricing.description,
+            is_active=pricing.is_active,
+            created_at=pricing.created_at.isoformat() if pricing.created_at else "",
+            updated_at=pricing.updated_at.isoformat() if pricing.updated_at else ""
+        ))
+    
+    return result
+
+@router.post("/service-pricing", response_model=ServicePricingResponse)
+async def create_service_pricing(
+    pricing_data: ServicePricingCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create new service pricing"""
+    # Get agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent profile not found"
+        )
+    
+    # Check if pricing already exists for this subcategory
+    existing_pricing = db.query(AgentServicePricing).filter(
+        AgentServicePricing.agent_id == agent.id,
+        AgentServicePricing.sub_category_id == pricing_data.sub_category_id
+    ).first()
+    
+    if existing_pricing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pricing already exists for this service"
+        )
+    
+    # Create new pricing
+    new_pricing = AgentServicePricing(
+        agent_id=agent.id,
+        sub_category_id=pricing_data.sub_category_id,
+        base_price=pricing_data.base_price,
+        description=pricing_data.description
+    )
+    
+    db.add(new_pricing)
+    db.commit()
+    db.refresh(new_pricing)
+    
+    # Get subcategory and category names for response
+    subcat_info = db.query(
+        SubCategory.name.label('sub_category_name'),
+        Category.name.label('category_name')
+    ).join(
+        Category, SubCategory.category_id == Category.id
+    ).filter(
+        SubCategory.id == pricing_data.sub_category_id
+    ).first()
+    
+    return ServicePricingResponse(
+        id=new_pricing.id,
+        agent_id=new_pricing.agent_id,
+        sub_category_id=new_pricing.sub_category_id,
+        sub_category_name=subcat_info.sub_category_name,
+        category_name=subcat_info.category_name,
+        price_type=new_pricing.price_type,
+        base_price=new_pricing.base_price,
+        min_price=new_pricing.min_price,
+        max_price=new_pricing.max_price,
+        description=new_pricing.description,
+        is_active=new_pricing.is_active,
+        created_at=new_pricing.created_at.isoformat() if new_pricing.created_at else "",
+        updated_at=new_pricing.updated_at.isoformat() if new_pricing.updated_at else ""
+    )
+
+@router.put("/service-pricing/{pricing_id}", response_model=ServicePricingResponse)
+async def update_service_pricing(
+    pricing_id: int,
+    pricing_data: ServicePricingUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update service pricing"""
+    # Get agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent profile not found"
+        )
+    
+    # Get pricing record
+    pricing = db.query(AgentServicePricing).filter(
+        AgentServicePricing.id == pricing_id,
+        AgentServicePricing.agent_id == agent.id
+    ).first()
+    
+    if not pricing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service pricing not found"
+        )
+    
+    # Update pricing
+    if pricing_data.base_price is not None:
+        pricing.base_price = pricing_data.base_price
+    if pricing_data.description is not None:
+        pricing.description = pricing_data.description
+    
+    db.commit()
+    db.refresh(pricing)
+    
+    # Get subcategory and category names for response
+    subcat_info = db.query(
+        SubCategory.name.label('sub_category_name'),
+        Category.name.label('category_name')
+    ).join(
+        Category, SubCategory.category_id == Category.id
+    ).filter(
+        SubCategory.id == pricing.sub_category_id
+    ).first()
+    
+    return ServicePricingResponse(
+        id=pricing.id,
+        agent_id=pricing.agent_id,
+        sub_category_id=pricing.sub_category_id,
+        sub_category_name=subcat_info.sub_category_name,
+        category_name=subcat_info.category_name,
+        price_type=pricing.price_type,
+        base_price=pricing.base_price,
+        min_price=pricing.min_price,
+        max_price=pricing.max_price,
+        description=pricing.description,
+        is_active=pricing.is_active,
+        created_at=pricing.created_at.isoformat() if pricing.created_at else "",
+        updated_at=pricing.updated_at.isoformat() if pricing.updated_at else ""
+    )
+
+@router.delete("/service-pricing/{pricing_id}")
+async def delete_service_pricing(
+    pricing_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete service pricing"""
+    # Get agent
+    agent = db.query(Agent).filter(Agent.user_id == current_user.id).first()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent profile not found"
+        )
+    
+    # Get pricing record
+    pricing = db.query(AgentServicePricing).filter(
+        AgentServicePricing.id == pricing_id,
+        AgentServicePricing.agent_id == agent.id
+    ).first()
+    
+    if not pricing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service pricing not found"
+        )
+    
+    db.delete(pricing)
+    db.commit()
+    
+    return {"success": True, "message": "Service pricing deleted successfully"}
+
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent_by_id(
     agent_id: int,
@@ -392,6 +1085,9 @@ async def get_agent_profile(
         AgentCategory.agent_id == agent.id
     ).all()
     
+    # Get user details for enhanced fields
+    user = db.query(User).filter(User.id == agent.user_id).first()
+    
     return AgentProfileResponse(
         id=agent.id,
         user_id=agent.user_id,
@@ -402,7 +1098,21 @@ async def get_agent_profile(
         avg_rating=agent.avg_rating,
         total_ratings=agent.total_ratings,
         kyc_status=agent.kyc_status,
-        categories=[cat.name for cat in categories]
+        categories=[cat.name for cat in categories],
+        # Enhanced profile fields
+        profile_photo_url=agent.profile_photo_url,
+        selfie_verification_url=agent.selfie_verification_url,
+        formatted_phone=agent.formatted_phone,
+        bio=agent.bio,
+        experience_years=agent.experience_years,
+        # Structured address
+        address_line_1=agent.address_line_1,
+        address_line_2=agent.address_line_2,
+        city=agent.city,
+        state=agent.state,
+        postal_code=agent.postal_code,
+        country=agent.country,
+        google_place_id=agent.google_place_id
     )
 
 @router.post("/create", response_model=AgentProfileResponse)
@@ -422,7 +1132,7 @@ async def create_agent(
             detail="User already has an agent profile"
         )
     
-    # Create new agent
+    # Create new agent with all fields
     new_agent = Agent(
         user_id=current_user.id,
         rate_per_km=agent_data.rate_per_km,
@@ -430,10 +1140,30 @@ async def create_agent(
         is_online=False,
         avg_rating=0.0,
         total_ratings=0,
-        kyc_status='verified'  # Auto-approve for MVP
+        kyc_status='verified',  # Auto-approve for MVP
+        # Enhanced profile fields
+        formatted_phone=agent_data.formatted_phone,
+        profile_photo_url=agent_data.profile_photo_url,
+        selfie_verification_url=agent_data.selfie_verification_url,
+        experience_years=agent_data.experience_years or 0,
+        bio=agent_data.bio,
+        # Address fields
+        address=agent_data.address,
+        address_line_1=agent_data.address_line_1,
+        address_line_2=agent_data.address_line_2,
+        city=agent_data.city,
+        state=agent_data.state,
+        postal_code=agent_data.postal_code,
+        country=agent_data.country or "India",
+        google_place_id=agent_data.google_place_id,
+        selfie_verification_status='pending' if agent_data.selfie_verification_url else 'not_required'
     )
     
     db.add(new_agent)
+    
+    # Update user to mark as agent
+    current_user.is_agent = True
+    
     db.commit()
     db.refresh(new_agent)
     
@@ -444,6 +1174,18 @@ async def create_agent(
             category_id=category_id
         )
         db.add(agent_category)
+    
+    # Add agent subcategories
+    if agent_data.selectedSubCategories:
+        for sub_category_id in agent_data.selectedSubCategories:
+            # Verify subcategory exists
+            subcategory = db.query(SubCategory).filter(SubCategory.id == sub_category_id).first()
+            if subcategory:
+                agent_subcategory = AgentSubCategory(
+                    agent_id=new_agent.id,
+                    sub_category_id=sub_category_id
+                )
+                db.add(agent_subcategory)
     
     db.commit()
     
@@ -464,7 +1206,21 @@ async def create_agent(
         avg_rating=new_agent.avg_rating,
         total_ratings=new_agent.total_ratings,
         kyc_status=new_agent.kyc_status,
-        categories=[cat.name for cat in categories]
+        categories=[cat.name for cat in categories],
+        # Enhanced profile fields
+        profile_photo_url=new_agent.profile_photo_url,
+        selfie_verification_url=new_agent.selfie_verification_url,
+        formatted_phone=new_agent.formatted_phone,
+        bio=new_agent.bio,
+        experience_years=new_agent.experience_years,
+        # Structured address
+        address_line_1=new_agent.address_line_1,
+        address_line_2=new_agent.address_line_2,
+        city=new_agent.city,
+        state=new_agent.state,
+        postal_code=new_agent.postal_code,
+        country=new_agent.country,
+        google_place_id=new_agent.google_place_id
     )
 
 class UpdateStatusRequest(BaseModel):
@@ -537,3 +1293,4 @@ async def update_agent_location(
             "area": location_data.area
         }
     }
+

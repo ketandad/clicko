@@ -27,8 +27,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from '../contexts/LocationContext';
 import { getCategories, getFeaturedCategories } from '../services/categoryService';
 import { searchAgents } from '../services/searchService';
-import LocationDisplay from '../components/LocationDisplay';
-import LocationPickerModal from '../components/LocationPickerModal';
+// Location is now handled in its own tab
 import { colors } from '../theme';
 
 const { width } = Dimensions.get('window');
@@ -45,7 +44,6 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -158,13 +156,23 @@ export default function HomeScreen() {
     <TouchableOpacity
       style={styles.categoryItem}
       onPress={() => handleCategorySelect(item)}
+      activeOpacity={0.8}
     >
       <Surface style={styles.categorySurface}>
-        <Image
-          source={{ uri: item.icon_url || 'https://via.placeholder.com/60' }}
-          style={styles.categoryImage}
-        />
-        <Text style={styles.categoryName}>{item.name}</Text>
+        <View style={styles.categoryIconContainer}>
+          <Image
+            source={{ uri: item.icon_url || 'https://cdn-icons-png.flaticon.com/64/2282/2282163.png' }}
+            style={styles.categoryImage}
+          />
+        </View>
+        <View style={styles.categoryTextContainer}>
+          <Text style={styles.categoryName} numberOfLines={2}>{item.name}</Text>
+          {item.agent_count > 0 && (
+            <Text style={styles.agentCountText}>
+              {item.agent_count} {item.agent_count === 1 ? 'Provider' : 'Providers'}
+            </Text>
+          )}
+        </View>
       </Surface>
     </TouchableOpacity>
   );
@@ -232,8 +240,10 @@ export default function HomeScreen() {
       
       <View style={styles.header}>
         <View style={styles.topSection}>
-          <View style={styles.locationSection}>
-            <LocationDisplay onLocationPress={() => setLocationPickerVisible(true)} />
+          <View style={styles.brandSection}>
+            <Text style={styles.brandTitle}>ClickO</Text>
+            <Text style={styles.brandSubtitle}>Connect with trusted service providers</Text>
+            <Text style={styles.brandDescription}>We help you find the right agent for your needs</Text>
           </View>
         </View>
       </View>
@@ -323,7 +333,12 @@ export default function HomeScreen() {
             </View>
             
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>All Services</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>All Services</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Browse all available home services in your area
+                </Text>
+              </View>
             </View>
           </>
         )}
@@ -344,11 +359,6 @@ export default function HomeScreen() {
           </View>
         )}
       </ScrollView>
-      
-      <LocationPickerModal
-        visible={locationPickerVisible}
-        onClose={() => setLocationPickerVisible(false)}
-      />
     </SafeAreaView>
   );
 }
@@ -390,9 +400,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 2,
   },
-  locationSection: {
+  brandSection: {
     flex: 1,
-    alignItems: 'flex-start',
+    alignItems: 'center',
+  },
+  brandTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.primary,
+  },
+  brandSubtitle: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  brandDescription: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 1,
+    opacity: 0.8,
   },
   searchbar: {
     margin: 16,
@@ -421,7 +447,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.textPrimary,
-    marginBottom: 12,
+    marginBottom: 4,
+  },
+  sectionHeader: {
+    marginBottom: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 8,
   },
   featuredList: {
     paddingVertical: 8,
@@ -462,23 +496,55 @@ const styles = StyleSheet.create({
     margin: 8,
   },
   categorySurface: {
-    padding: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 16,
+    elevation: 3,
+    backgroundColor: '#ffffff',
+    height: 140,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  categoryIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.primary + '15',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    elevation: 1,
-    backgroundColor: '#ffffff',
-    height: 120,
+    marginBottom: 8,
   },
   categoryImage: {
-    width: 50,
-    height: 50,
-    marginBottom: 8,
+    width: 32,
+    height: 32,
+    tintColor: colors.primary,
+  },
+  categoryTextContainer: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
   },
   categoryName: {
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.textPrimary,
+    marginBottom: 4,
+    lineHeight: 16,
+  },
+  agentCountText: {
+    textAlign: 'center',
+    fontSize: 10,
+    color: colors.textSecondary,
+    fontWeight: '500',
   },
   noResults: {
     alignItems: 'center',
