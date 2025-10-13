@@ -20,10 +20,11 @@ import {
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../theme';
-import AgentCard from '../../components/AgentCard';
-import { nearbyAgentsService } from '../../services/nearbyAgentsService';
-import { userLocationService } from '../../services/userLocationService';
+import { colors } from '../theme';
+import AgentCard from '../components/AgentCard';
+import { nearbyAgentsService } from '../services/nearbyAgentsService';
+import { userLocationService } from '../services/userLocationService';
+import { getSubCategories } from '../services/subCategoryService';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -48,7 +49,7 @@ const DISTANCE_FILTERS = [
 ];
 
 const AgentDiscoveryScreen = ({ navigation, route }) => {
-  const { serviceCategory } = route?.params || {};
+  const { serviceCategory, categoryId } = route?.params || {};
 
   const [agents, setAgents] = useState([]);
   const [filteredAgents, setFilteredAgents] = useState([]);
@@ -56,6 +57,11 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [userLocation, setUserLocation] = useState(null);
+  
+  // Subcategory states
+  const [subCategories, setSubCategories] = useState([]);
+  const [selectedSubCategories, setSelectedSubCategories] = useState([]);
+  const [loadingSubCategories, setLoadingSubCategories] = useState(false);
   
   // Filter and sort states
   const [sortBy, setSortBy] = useState('distance');
@@ -117,6 +123,21 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
     }
   }, [userLocation, sortBy, serviceCategory, loadUserLocation]);
 
+  const loadSubCategories = useCallback(async () => {
+    if (!categoryId) return;
+    
+    try {
+      setLoadingSubCategories(true);
+      const subCategoriesData = await getSubCategories(categoryId);
+      setSubCategories(subCategoriesData);
+    } catch (error) {
+      console.error('Failed to load subcategories:', error);
+      // Don't show error alert for subcategories as it's not critical
+    } finally {
+      setLoadingSubCategories(false);
+    }
+  }, [categoryId]);
+
   const applyFilters = useCallback(() => {
     let filtered = [...agents];
 
@@ -148,8 +169,17 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
       );
     }
 
+    // Apply subcategory filter
+    if (selectedSubCategories.length > 0) {
+      filtered = filtered.filter(agent => 
+        selectedSubCategories.some(subCatId => 
+          agent.sub_categories?.some(agentSubCat => agentSubCat.id === subCatId)
+        )
+      );
+    }
+
     setFilteredAgents(filtered);
-  }, [agents, searchQuery, ratingFilter, distanceFilter]);
+  }, [agents, searchQuery, ratingFilter, distanceFilter, selectedSubCategories]);
 
   useEffect(() => {
     applyFilters();
@@ -158,12 +188,15 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
   useEffect(() => {
     const initializeScreen = async () => {
       setLoading(true);
-      await loadNearbyAgents(null, false);
+      await Promise.all([
+        loadNearbyAgents(null, false),
+        loadSubCategories()
+      ]);
       setLoading(false);
     };
 
     initializeScreen();
-  }, []);
+  }, [loadNearbyAgents, loadSubCategories]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -171,9 +204,31 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
     setRefreshing(false);
   }, [loadNearbyAgents]);
 
+  const toggleSubCategory = (subCategoryId) => {
+    setSelectedSubCategories(prev => 
+      prev.includes(subCategoryId)
+        ? prev.filter(id => id !== subCategoryId)
+        : [...prev, subCategoryId]
+    );
+  };
+
+  const clearSubCategoryFilter = () => {
+    setSelectedSubCategories([]);
+  };
+
   const handleAgentPress = useCallback((agent) => {
-    navigation.navigate('AgentDetail', { agent });
-  }, [navigation]);
+    // Get the selected subcategory name if any
+    const selectedSubcategoryName = selectedSubCategories.length > 0 
+      ? subCategories.find(sub => sub.id === selectedSubCategories[0])?.name 
+      : null;
+      
+    // Go directly to booking - skip unnecessary detail screen
+    navigation.navigate('BookingConfirmation', { 
+      agent,
+      selectedCategory: serviceCategory,
+      selectedSubcategory: selectedSubcategoryName
+    });
+  }, [navigation, serviceCategory, selectedSubCategories, subCategories]);
 
   const handleBookAgent = useCallback((agent) => {
     navigation.navigate('BookingEstimate', { agent });
@@ -347,6 +402,49 @@ const AgentDiscoveryScreen = ({ navigation, route }) => {
           inputStyle={styles.searchInput}
         />
       </View>
+
+      {/* Subcategory Filters */}
+      {subCategories.length > 0 && (
+        <View style={styles.subCategoryContainer}>
+          <View style={styles.subCategoryHeader}>
+            <Text style={styles.subCategoryTitle}>Filter by Service Type:</Text>
+            {selectedSubCategories.length > 0 && (
+              <Button 
+                mode="text" 
+                compact 
+                onPress={clearSubCategoryFilter}
+                labelStyle={styles.clearFilterText}
+              >
+                Clear All
+              </Button>
+            )}
+          </View>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={subCategories}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => (
+              <Chip
+                key={item.id}
+                selected={selectedSubCategories.includes(item.id)}
+                onPress={() => toggleSubCategory(item.id)}
+                style={[
+                  styles.subCategoryChip,
+                  selectedSubCategories.includes(item.id) && styles.selectedSubCategoryChip
+                ]}
+                textStyle={[
+                  styles.subCategoryChipText,
+                  selectedSubCategories.includes(item.id) && styles.selectedSubCategoryChipText
+                ]}
+              >
+                {item.name}
+              </Chip>
+            )}
+            contentContainerStyle={styles.subCategoryList}
+          />
+        </View>
+      )}
 
       {/* Results Header */}
       <View style={styles.resultsHeader}>
@@ -537,6 +635,48 @@ const styles = StyleSheet.create({
   applyButton: {
     flex: 1,
     marginLeft: 8,
+  },
+  // Subcategory filter styles
+  subCategoryContainer: {
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  subCategoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  subCategoryTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  clearFilterText: {
+    fontSize: 12,
+    color: colors.primary,
+  },
+  subCategoryList: {
+    paddingVertical: 4,
+  },
+  subCategoryChip: {
+    marginRight: 8,
+    backgroundColor: '#ffffff',
+    borderColor: colors.primary,
+    borderWidth: 1,
+  },
+  selectedSubCategoryChip: {
+    backgroundColor: colors.primary,
+  },
+  subCategoryChipText: {
+    fontSize: 12,
+    color: colors.primary,
+  },
+  selectedSubCategoryChipText: {
+    color: '#ffffff',
   },
 });
 

@@ -14,6 +14,16 @@ from ..auth.jwt import get_current_user
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
+# Helper function to safely get user ID
+def get_user_id(user):
+    """Safely extract user ID from user object or dict"""
+    if hasattr(user, 'id'):
+        return user.id
+    elif isinstance(user, dict) and 'id' in user:
+        return user['id']
+    else:
+        raise ValueError(f"Cannot extract user ID from: {type(user)}")
+
 # Pydantic Models for API
 class BookingCreateRequest(BaseModel):
     agent_id: int
@@ -74,38 +84,114 @@ class BookingResponse(BaseModel):
 # Initialize booking model
 booking_model = BookingModel()
 
-@router.post("/create", response_model=Dict[str, Any])
+@router.post("/create")
 async def create_booking(
     booking_data: BookingCreateRequest,
-    current_user: dict = Depends(get_current_user),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_current_user)
 ):
     """
-    Create a new service booking
-    Sends bell notification to agent that rings until accept/reject
+    Create a new service booking with immediate agent notification
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    booking_model = BookingModel()
+    
     try:
+        logger.info(f"🚀 [BOOKING-START] New booking request initiated")
+        logger.info(f"📋 [BOOKING-DATA] Service: {booking_data.service_category}, Agent: {booking_data.agent_id}, Amount: ₹{booking_data.total_amount}")
+        logger.info(f"📍 [BOOKING-LOCATION] Address: {booking_data.service_address}, City: {booking_data.service_city}")
+        logger.info(f"👤 [BOOKING-USER] Authenticated user: {getattr(current_user, 'name', 'Unknown')} (ID: {getattr(current_user, 'id', 'Unknown')})")
+        
         # Add user_id from authenticated user
         booking_dict = booking_data.dict()
-        booking_dict['user_id'] = current_user['id']
+        user_id = get_user_id(current_user)
+        booking_dict['user_id'] = user_id
+        logger.info(f"✅ [BOOKING-AUTH] User ID {user_id} added to booking payload")
         
-        # Create booking
-        booking_uuid = booking_model.create_booking(booking_dict)
+        # Check if agent is actually available (online AND connected to WebSocket)
+        logger.info(f"🔍 [BOOKING-VALIDATION] Checking agent {booking_dict['agent_id']} availability...")
+        from ..notifications.websocket_manager import notification_manager
+        agent_available = await notification_manager.is_agent_online(booking_dict['agent_id'])
         
+        if not agent_available:
+            logger.warning(f"❌ [BOOKING-REJECTED] Agent {booking_dict['agent_id']} is not available (offline or disconnected)")
+            raise HTTPException(
+                status_code=409,  # Conflict
+                detail="Agent is currently unavailable. Please try another agent or try again later."
+            )
+        logger.info(f"✅ [BOOKING-VALIDATED] Agent {booking_dict['agent_id']} confirmed online and ready to receive notifications")
+            
+        # Create booking in database
+        logger.info(f"💾 [BOOKING-DB] Creating booking record in database...")
+        try:
+            booking_uuid = booking_model.create_booking(booking_dict)
+            logger.info(f"✅ [BOOKING-DB] Booking created successfully with UUID: {booking_uuid}")
+        except Exception as model_err:
+            logger.error(f"❌ [BOOKING-DB] Database error during booking creation: {str(model_err)}")
+            logger.error(f"🔍 [BOOKING-DB] Booking data that failed: {booking_dict}")
+            raise HTTPException(status_code=500, detail=f"Booking creation failed: {str(model_err)}")
+            
         if not booking_uuid:
-            raise HTTPException(status_code=400, detail="Failed to create booking")
+            logger.error("❌ [BOOKING-DB] Booking UUID not returned, creation failed silently")
+            raise HTTPException(status_code=400, detail="Failed to create booking - no UUID returned")
         
-        # TODO: Add background task to send push notification to agent
-        # background_tasks.add_task(send_agent_notification, booking_dict['agent_id'], booking_uuid)
+        # Send real-time bell notification to agent
+        logger.info(f"🔔 [BOOKING-NOTIFY] Preparing notification for agent {booking_dict['agent_id']}...")
+        try:
+            from ..notifications.websocket_manager import notification_manager
+            
+            # Safely extract user name from current_user
+            user_name = "Unknown Customer"
+            if hasattr(current_user, 'name'):
+                user_name = current_user.name
+            elif isinstance(current_user, dict) and 'name' in current_user:
+                user_name = current_user['name']
+            
+            logger.info(f"👤 [BOOKING-NOTIFY] Customer name: {user_name}")
+            
+            notification_data = {
+                "booking_uuid": booking_uuid,
+                "booking_id": booking_dict.get('booking_id'),
+                "user_name": user_name,
+                "service_category": booking_dict['service_category'],
+                "service_address": booking_dict['service_address'],
+                "total_amount": float(booking_dict['total_amount']),
+                "is_emergency": booking_dict.get('is_emergency', False)
+            }
+            
+            logger.info(f"📦 [BOOKING-NOTIFY] Notification payload: {notification_data}")
+            
+            # Send bell notification via WebSocket
+            background_tasks.add_task(
+                notification_manager.send_bell_notification,
+                booking_dict['agent_id'],
+                notification_data
+            )
+            logger.info(f"🔔 [BOOKING-NOTIFY] Bell notification queued for agent {booking_dict['agent_id']} - will ring for 2 minutes")
+        except Exception as notification_err:
+            # Don't fail the booking if notification fails
+            logger.error(f"⚠️ [BOOKING-NOTIFY] Failed to send bell notification: {str(notification_err)}")
+            logger.error(f"🔍 [BOOKING-NOTIFY] Notification data that failed: {notification_data if 'notification_data' in locals() else 'Not created'}")
+        
+        logger.info(f"🎉 [BOOKING-SUCCESS] Booking flow completed successfully!")
+        logger.info(f"📋 [BOOKING-SUMMARY] UUID: {booking_uuid}, Agent: {booking_dict['agent_id']}, Customer: {user_name}, Amount: ₹{booking_dict['total_amount']}")
         
         return {
             "success": True,
-            "message": "Booking created successfully",
+            "message": "Booking request sent to agent. Bell will ring for 2 minutes...",
             "booking_uuid": booking_uuid,
-            "agent_timeout": "30 seconds"
+            "status": "pending", 
+            "agent_timeout": "2 minutes"
         }
-        
+    except HTTPException:
+        # Re-raise HTTP exceptions (409, 400, etc.) without modification
+        raise
     except Exception as e:
+        logger.error(f"💥 [BOOKING-ERROR] Unexpected error in booking flow: {str(e)}")
+        logger.error(f"🔍 [BOOKING-ERROR] Error type: {type(e).__name__}")
+        logger.error(f"📋 [BOOKING-ERROR] Booking data when error occurred: {booking_dict if 'booking_dict' in locals() else 'Not available'}")
         raise HTTPException(status_code=500, detail=f"Failed to create booking: {str(e)}")
 
 @router.put("/{booking_uuid}/status")
@@ -131,7 +217,7 @@ async def update_booking_status(
         success = booking_model.update_booking_status(
             booking_uuid=booking_uuid,
             new_status=status_update.status,
-            changed_by_user_id=current_user['id'],
+            changed_by_user_id=get_user_id(current_user),
             changed_by_role=changed_by_role,
             reason=status_update.reason,
             location_data=location_data
@@ -163,7 +249,7 @@ async def get_agent_notifications(
         if current_user.get('user_type') != 'agent':
             raise HTTPException(status_code=403, detail="Only agents can access notifications")
         
-        agent_id = current_user['id']
+        agent_id = get_user_id(current_user)
         notifications = booking_model.get_pending_agent_notifications(
             agent_id=agent_id, 
             timeout_check=not include_expired
@@ -209,7 +295,7 @@ async def update_agent_location(
         
         booking_id, agent_id = result
         
-        if agent_id != current_user['id']:
+        if agent_id != get_user_id(current_user):
             raise HTTPException(status_code=403, detail="Not authorized for this booking")
         
         success = booking_model.add_agent_location_update(
@@ -248,7 +334,7 @@ async def get_user_booking_history(
         cursor = conn.cursor()
         
         where_conditions = ["user_id = ?"]
-        params = [current_user['id']]
+        params = [get_user_id(current_user)]
         
         if status_filter:
             where_conditions.append("booking_status = ?")
@@ -296,7 +382,7 @@ async def get_agent_bookings(
         cursor = conn.cursor()
         
         where_conditions = ["agent_id = ?"]
-        params = [current_user['id']]
+        params = [get_user_id(current_user)]
         
         if status_filter:
             where_conditions.append("booking_status = ?")
@@ -325,6 +411,7 @@ async def get_agent_bookings(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get agent bookings: {str(e)}")
+
 
 @router.post("/system/handle-timeouts")
 async def handle_notification_timeouts():
@@ -376,8 +463,9 @@ async def get_booking_details(
         columns = [description[0] for description in cursor.description]
         booking = dict(zip(columns, result))
         
-        if (booking['user_id'] != current_user['id'] and 
-            booking['agent_id'] != current_user['id']):
+        user_id = get_user_id(current_user)
+        if (booking['user_id'] != user_id and 
+            booking['agent_id'] != user_id):
             raise HTTPException(status_code=403, detail="Not authorized to view this booking")
         
         return {

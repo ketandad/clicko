@@ -9,6 +9,8 @@ from shared.notifications.routes import router as notifications_router
 from shared.agent.routes import router as agent_router
 from shared.rating.routes import router as rating_router
 from shared.booking.routes import router as booking_router
+from shared.scheduled_booking.routes import router as scheduled_booking_router
+from shared.post_service_review.routes import router as post_service_review_router
 from shared.database import engine, Base
 # Import models so they register with Base
 from shared.user.models import User, Agent, Category, AgentCategory, Booking, Rating
@@ -82,6 +84,8 @@ app.include_router(notifications_router, prefix="/api/notifications", tags=["not
 app.include_router(agent_router, prefix="/api")
 app.include_router(rating_router, prefix="/api")
 app.include_router(booking_router)
+app.include_router(scheduled_booking_router, prefix="/api")
+app.include_router(post_service_review_router, prefix="/api")
 
 @app.get("/")
 async def root():

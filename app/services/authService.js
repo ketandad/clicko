@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import config from '../config';
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: config.API_URL,
   headers: {
     'Content-Type': 'application/json',
@@ -10,6 +10,11 @@ const api = axios.create({
 });
 
 export const setAuthToken = (token) => {
+  if (!api || !api.defaults) {
+    console.error('❌ AuthService: API instance not properly initialized');
+    return;
+  }
+  
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   } else {

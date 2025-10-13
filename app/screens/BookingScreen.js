@@ -17,18 +17,51 @@ export default function BookingScreen() {
   const [date, setDate] = React.useState(new Date());
   const [requirements, setRequirements] = React.useState('');
 
-  const handleBooking = () => {
+  const handleBooking = async () => {
     Alert.alert(
       'Confirm Visit Booking',
       `Pay ₹${visitCharge || 40} visit charge to connect with ${agentName}?\n\nThis covers their travel cost. Service charges will be discussed directly with the agent.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Pay & Book', 
-          onPress: () => {
-            // TODO: Implement booking logic
-            Alert.alert('Booking Confirmed!', 'You will receive agent contact details shortly.');
-            navigation.goBack();
+        {
+          text: 'Pay & Book',
+          onPress: async () => {
+            try {
+              // Call backend API to create booking
+              const response = await fetch('http://localhost:8000/api/bookings/create', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  // Add auth token if needed
+                },
+                body: JSON.stringify({
+                  agent_id: agentId,
+                  service_category: categoryId || 'General',
+                  service_latitude: 0, // TODO: Use actual location
+                  service_longitude: 0,
+                  service_address: 'User Address', // TODO: Use actual address
+                  service_city: 'City',
+                  service_state: 'State',
+                  service_pincode: '000000',
+                  visit_charge: visitCharge || 40,
+                  service_charge: 0,
+                  total_amount: visitCharge || 40,
+                  requested_date: new Date().toISOString().slice(0, 10),
+                  requested_time_slot: null,
+                  service_description: requirements,
+                })
+              });
+              const result = await response.json();
+              if (result.success) {
+                // Use the proper message from backend - should be "Booking request sent to agent. Bell will ring for 2 minutes..."
+                Alert.alert('Request Sent!', result.message || 'Your booking request has been sent to the agent. Please wait for their response.');
+                navigation.goBack();
+              } else {
+                Alert.alert('Booking Failed', result.message || 'Could not create booking.');
+              }
+            } catch (err) {
+              Alert.alert('Error', 'Failed to create booking. Please try again.');
+            }
           }
         }
       ]
@@ -95,7 +128,6 @@ export default function BookingScreen() {
                 >
                   Pick Date & Time
                 </Button>
-                
                 {showPicker && (
                   <DateTimePicker
                     value={date}
@@ -108,31 +140,8 @@ export default function BookingScreen() {
                     }}
                   />
                 )}
-                
-                {schedule && (
-                  <Text style={styles.scheduledTime}>
-                    Scheduled: {date.toLocaleDateString()} at {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                )}
               </View>
             )}
-          </Card.Content>
-        </Card>
-
-        {/* Requirements */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Text style={styles.sectionTitle}>Your Requirements</Text>
-            <TextInput
-              label="Describe your service needs"
-              value={requirements}
-              onChangeText={setRequirements}
-              mode="outlined"
-              multiline
-              numberOfLines={4}
-              placeholder="E.g., Need to fix electrical wiring in bedroom, install 2 new switches..."
-              style={styles.textInput}
-            />
             <Text style={styles.helperText}>
               Share details so the agent can come prepared with necessary tools/materials
             </Text>
@@ -163,6 +172,7 @@ export default function BookingScreen() {
     </SafeAreaView>
   );
 }
+// ...existing code...
 
 const styles = StyleSheet.create({
   container: {

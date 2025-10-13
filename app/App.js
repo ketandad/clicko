@@ -7,7 +7,9 @@ import { View } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthProvider } from './contexts/AuthContext';
 import { LocationProvider } from './contexts/LocationContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import BackendStatusBanner from './components/BackendStatusBanner';
+import GlobalBookingModal from './components/GlobalBookingModal';
 import { theme } from './theme';
 
 export default function App() {
@@ -16,13 +18,17 @@ export default function App() {
       <SafeAreaProvider>
         <AuthProvider>
           <LocationProvider>
-            <NavigationContainer>
-              <StatusBar style="auto" />
-              <View style={{ flex: 1 }}>
-                <BackendStatusBanner />
-                <AppNavigator />
-              </View>
-            </NavigationContainer>
+            <NotificationProvider>
+              <NavigationContainer>
+                <StatusBar style="auto" />
+                <View style={{ flex: 1 }}>
+                  <BackendStatusBanner />
+                  <AppNavigator />
+                  {/* Global booking modal that appears on any screen */}
+                  <GlobalBookingModal />
+                </View>
+              </NavigationContainer>
+            </NotificationProvider>
           </LocationProvider>
         </AuthProvider>
       </SafeAreaProvider>

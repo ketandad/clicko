@@ -1,7 +1,7 @@
 import config from '../config';
 import { getToken } from './authService';
 
-const { API_URL: API_BASE_URL } = config;
+const API_BASE_URL = config?.API_URL || 'http://localhost:8000';
 
 /**
  * Get all service pricing for the current agent

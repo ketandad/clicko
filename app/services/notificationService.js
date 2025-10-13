@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getWebSocketUrl } from '../utils/urlConfig';
 
 class NotificationService {
   constructor() {
@@ -11,24 +12,44 @@ class NotificationService {
     this.isConnected = false;
     this.listeners = [];
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = 2; // Reduced attempts to avoid spam
   }
 
   /**
    * Connect agent to notification WebSocket
    */
   connect(agentId, authToken) {
+    console.log('🎯 [NS-CONNECT-START] NotificationService.connect() called');
+    console.log('🔍 [NS-PARAMS] AgentId:', agentId, 'AuthToken length:', authToken?.length || 0);
+    
     if (this.wsConnection && this.isConnected) {
-      console.log('🔔 Already connected to notifications');
+      console.log('🔔 [NS-ALREADY] Already connected to notifications');
       return;
     }
 
     try {
-      const wsUrl = `ws://localhost:8000/api/notifications/ws/agent/${agentId}`;
+      const wsUrl = getWebSocketUrl(agentId);
+      console.log('🔗 [WS-DEBUG] Starting WebSocket connection...');
+      console.log('🔗 [WS-DEBUG] URL:', wsUrl);
+      console.log('🔗 [WS-DEBUG] Agent ID:', agentId);
+      console.log('🔗 [WS-DEBUG] Platform:', require('react-native').Platform.OS);
+      
+      // Test URL reachability first
+      console.log('🔍 [WS-DEBUG] Testing HTTP connectivity to same host...');
+      
       this.wsConnection = new WebSocket(wsUrl);
+      console.log('✅ [WS-DEBUG] WebSocket object created successfully');
+
+      // Debug timer to detect hanging connections
+      const debugTimer = setTimeout(() => {
+        console.log('⚠️ [WS-DEBUG] WebSocket connection hanging - no events fired after 3 seconds');
+        console.log('⚠️ [WS-DEBUG] ReadyState:', this.wsConnection?.readyState);
+        console.log('⚠️ [WS-DEBUG] ReadyState meanings: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED');
+      }, 3000);
 
       this.wsConnection.onopen = () => {
-        console.log('🔔 Connected to notification system');
+        clearTimeout(debugTimer);
+        console.log('✅ [WS-CONNECT] WebSocket connection established successfully');
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.notifyListeners('connected', { agentId });
@@ -37,15 +58,15 @@ class NotificationService {
       this.wsConnection.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          console.log('📩 Notification received:', message.type);
+          console.log('📩 [WS-MESSAGE] Notification received:', message.type);
           this.handleMessage(message);
         } catch (error) {
-          console.error('Error parsing notification message:', error);
+          console.error('❌ [WS-ERROR] Error parsing notification message:', error);
         }
       };
 
       this.wsConnection.onclose = (event) => {
-        console.log('🔌 Disconnected from notification system:', event.code);
+        console.log('🔌 [WS-CLOSE] WebSocket connection closed:', { code: event.code, reason: event.reason, wasClean: event.wasClean });
         this.isConnected = false;
         this.wsConnection = null;
         
@@ -62,12 +83,20 @@ class NotificationService {
       };
 
       this.wsConnection.onerror = (error) => {
-        console.error('🚨 WebSocket error:', error);
+        clearTimeout(debugTimer);
+        console.error('❌ [WS-ERROR] WebSocket connection failed!');
+        console.error('❌ [WS-ERROR] Error object:', error);
+        console.error('❌ [WS-ERROR] Error message:', error?.message || 'No message');
+        console.error('❌ [WS-ERROR] Error type:', error?.type || 'No type');
+        console.error('❌ [WS-ERROR] URL attempted:', wsUrl);
+        console.error('❌ [WS-ERROR] Agent ID:', agentId);
+        console.error('❌ [WS-ERROR] ReadyState when error occurred:', this.wsConnection?.readyState);
+        console.log('📵 [WS-STATUS] Notifications service unavailable - continuing without real-time updates');
         this.notifyListeners('error', error);
       };
 
     } catch (error) {
-      console.error('Error connecting to notifications:', error);
+      console.log('📵 Notifications service unavailable - continuing without real-time updates');
       this.notifyListeners('error', error);
     }
   }

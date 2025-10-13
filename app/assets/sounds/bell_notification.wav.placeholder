@@ -1,0 +1,5 @@
+// Note: Place bell_notification.wav sound file here for booking notifications
+// You can download a suitable bell sound and place it as:
+// /workspaces/clicko/app/assets/sounds/bell_notification.wav
+
+export default null;

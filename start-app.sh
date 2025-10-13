@@ -20,20 +20,31 @@ pkill -f "expo start" 2>/dev/null || true
 pkill -f "uvicorn" 2>/dev/null || true
 sleep 2
 
-# Start backend first
-echo -e "${BLUE}🔧 Starting backend server...${NC}"
+# Install backend dependencies first
+echo -e "${BLUE}🔧 Installing backend dependencies...${NC}"
 cd /workspaces/clicko/backend
-python main.py &
+
+# Deactivate virtual environment if active and use system Python
+if [ ! -z "$VIRTUAL_ENV" ]; then
+    deactivate 2>/dev/null || true
+fi
+
+# Use system Python to install packages
+/usr/bin/python3 -m pip install --break-system-packages fastapi uvicorn pydantic[email] pytz aiohttp || echo -e "${YELLOW}⚠️  Some packages may already be installed${NC}"
+
+# Start backend server
+echo -e "${BLUE}🔧 Starting backend server...${NC}"
+/usr/bin/python3 main.py &
 BACKEND_PID=$!
 echo -e "${GREEN}✅ Backend started (PID: $BACKEND_PID)${NC}"
 
-# Wait for backend
-echo -e "${YELLOW}⏳ Waiting for backend...${NC}"
-sleep 3
+# Wait for backend to start
+echo -e "${YELLOW}⏳ Waiting for backend to initialize...${NC}"
+sleep 5
 if curl -s http://localhost:8000/health > /dev/null; then
     echo -e "${GREEN}✅ Backend API ready at http://localhost:8000${NC}"
 else
-    echo -e "${RED}⚠️  Backend might still be starting...${NC}"
+    echo -e "${YELLOW}⚠️  Backend still starting... (check logs if issues persist)${NC}"
 fi
 
 # Configure mobile app
@@ -136,9 +147,18 @@ echo -e "${YELLOW}📦 Installing additional packages...${NC}"
 npm install expo-document-picker --legacy-peer-deps --silent
 npm install @react-navigation/stack --legacy-peer-deps --silent  
 npm install @react-native-community/datetimepicker --legacy-peer-deps --silent
+npm install expo-notifications --legacy-peer-deps --silent
 npm install @types/react@^18.2.0 --save-dev --legacy-peer-deps --silent
 
 echo -e "${GREEN}✅ Dependencies ready${NC}"
+
+# Clear Metro cache to resolve bundling issues
+echo -e "${YELLOW}🧹 Clearing Metro cache...${NC}"
+rm -rf .expo node_modules/.cache .metro 2>/dev/null || true
+
+# Optional: Update Expo packages for better compatibility
+echo -e "${YELLOW}🔧 Checking for package updates...${NC}"
+echo -e "${BLUE}ℹ️  To fix version warnings, run: npx expo install --fix${NC}"
 
 # Start Expo with QR code
 echo ""

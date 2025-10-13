@@ -4,9 +4,12 @@ Handles agent connections and bell notifications
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer
 import json
 import logging
+import asyncio
+import time
 from typing import Optional
 
 from .websocket_manager import notification_manager, start_notification_cleanup
@@ -269,4 +272,118 @@ async def debug_pending_notifications(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Debug endpoint error"
+        )
+
+@router.get("/sse/agent/{agent_id}")
+async def sse_notifications(
+    agent_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Server-Sent Events endpoint for notifications
+    Alternative to WebSocket for GitHub Codespaces compatibility
+    """
+    
+    async def event_stream():
+        try:
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'agent_id': agent_id, 'timestamp': time.time()})}\n\n"
+            
+            while True:
+                # Check for pending notifications for this agent
+                agent_notifications = [
+                    notif for notif in notification_manager.pending_notifications.values()
+                    if notif.get('agent_id') == agent_id
+                ]
+                
+                for notification in agent_notifications:
+                    yield f"data: {json.dumps(notification)}\n\n"
+                
+                # Send heartbeat every 30 seconds
+                yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': time.time()})}\n\n"
+                
+                await asyncio.sleep(30)
+                
+        except asyncio.CancelledError:
+            logger.info(f"SSE connection closed for agent {agent_id}")
+        except Exception as e:
+            logger.error(f"SSE error for agent {agent_id}: {e}")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
+
+@router.get("/poll/agent/{agent_id}")
+async def poll_notifications(
+    agent_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Polling endpoint for notifications
+    Fallback when neither WebSocket nor SSE work
+    """
+    try:
+        # Get pending notifications for this agent
+        agent_notifications = [
+            notif for notif in notification_manager.pending_notifications.values()
+            if notif.get('agent_id') == agent_id and notif.get('status') == 'pending'
+        ]
+        
+        return {
+            "success": True,
+            "notifications": agent_notifications,
+            "timestamp": time.time(),
+            "agent_id": agent_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Polling error for agent {agent_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get notifications"
+        )
+
+@router.post("/response")
+async def notification_response(
+    response_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Handle notification responses via HTTP
+    Used by SSE and polling clients
+    """
+    try:
+        notification_id = response_data.get("notification_id")
+        agent_id = response_data.get("agent_id")
+        response = response_data.get("response")
+        data = response_data.get("data", {})
+        
+        if not all([notification_id, agent_id, response]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="notification_id, agent_id, and response are required"
+            )
+        
+        result = await notification_manager.handle_agent_response(
+            agent_id, notification_id, response, data
+        )
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Response processed"),
+            "notification_id": notification_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing notification response: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process response"
         )

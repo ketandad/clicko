@@ -4,17 +4,43 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const API_BASE_URL = 'http://localhost:8000';
 
 class BookingService {
+    
+    /**
+     * Get authentication token from secure storage
+     */
+    async getAuthToken() {
+        try {
+            console.log('🔑 BookingService: Getting auth token...');
+            let token = await AsyncStorage.getItem('authToken');
+            console.log('🔑 BookingService: AsyncStorage authToken:', token ? 'Found' : 'Not found');
+            
+            if (!token) {
+                token = await SecureStore.getItemAsync('userToken');
+                console.log('🔑 BookingService: SecureStore userToken:', token ? 'Found' : 'Not found');
+            }
+            
+            return token;
+        } catch (error) {
+            console.error('❌ BookingService: Error getting auth token:', error);
+            throw new Error('Failed to retrieve authentication token: ' + error.message);
+        }
+    }
+    
     /**
      * Create a new service booking
      * Triggers bell notification to agent that rings until accept/reject
      */
     async createBooking(bookingData) {
         try {
-            const token = await AsyncStorage.getItem('authToken');
+            const token = await this.getAuthToken();
+            console.log('🔑 BookingService: Token retrieved:', token ? 'Present' : 'Missing');
+            console.log('🔄 BookingService: Sending booking request to:', `${API_BASE_URL}/api/bookings/create`);
+            console.log('📋 BookingService: Booking data:', JSON.stringify(bookingData, null, 2));
             
             const response = await fetch(`${API_BASE_URL}/api/bookings/create`, {
                 method: 'POST',
@@ -25,32 +51,33 @@ class BookingService {
                 body: JSON.stringify(bookingData),
             });
 
+            console.log('📡 BookingService: API Response status:', response.status);
+            console.log('📡 BookingService: API Response headers:', response.headers);
+
             if (!response.ok) {
                 const errorData = await response.json();
+                console.error('❌ BookingService: API Error response:', errorData);
                 throw new Error(errorData.detail || 'Failed to create booking');
             }
 
             const result = await response.json();
+            console.log('✅ BookingService: API Success response:', result);
             
             // Store booking UUID locally for tracking
             await AsyncStorage.setItem(`booking_${result.booking_uuid}`, JSON.stringify({
                 uuid: result.booking_uuid,
-                status: 'pending',
+                status: result.status || 'pending',
                 created_at: new Date().toISOString(),
                 agent_id: bookingData.agent_id,
             }));
 
-            // Send bell notification to agent
-            try {
-                await this.sendAgentNotification(result.booking_uuid, bookingData);
-            } catch (notificationError) {
-                console.warn('Failed to send agent notification:', notificationError);
-                // Don't fail the booking if notification fails
-            }
+            // NOTE: Backend already sends WebSocket notification to agent
+            // No need for duplicate client-side notification call
+            console.log('✅ BookingService: Backend handles agent notification via WebSocket');
 
             return result;
         } catch (error) {
-            console.error('Create booking error:', error);
+            console.error('❌ BookingService: Create booking error:', error);
             throw error;
         }
     }
@@ -284,6 +311,76 @@ class BookingService {
         }
         
         return true;
+    }
+
+    /**
+     * Complete a booking and trigger review prompt
+     * Called when agent marks service as completed
+     */
+    async completeBooking(bookingId) {
+        try {
+            const token = await AsyncStorage.getItem('authToken');
+            
+            const response = await fetch(`${API_BASE_URL}/api/bookings/${bookingId}/complete`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to complete booking');
+            }
+
+            const result = await response.json();
+            
+            // Update local storage
+            const storedBooking = await AsyncStorage.getItem(`booking_${bookingId}`);
+            if (storedBooking) {
+                const bookingData = JSON.parse(storedBooking);
+                bookingData.status = 'completed';
+                bookingData.completed_at = new Date().toISOString();
+                await AsyncStorage.setItem(`booking_${bookingId}`, JSON.stringify(bookingData));
+            }
+            
+            return {
+                success: true,
+                booking: result.booking,
+                message: result.message || 'Booking completed successfully'
+            };
+        } catch (error) {
+            console.error('Complete booking error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if a booking is eligible for review
+     */
+    async checkReviewEligibility(bookingId) {
+        try {
+            const token = await AsyncStorage.getItem('authToken');
+            
+            const response = await fetch(`${API_BASE_URL}/api/bookings/${bookingId}/review-eligibility`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to check review eligibility');
+            }
+
+            const result = await response.json();
+            return result;
+        } catch (error) {
+            console.error('Check review eligibility error:', error);
+            throw error;
+        }
     }
 }
 

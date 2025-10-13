@@ -124,27 +124,16 @@ export default function AgentListScreen() {
       
       <Card.Actions style={styles.cardActions}>
         <Button 
-          mode="outlined" 
-          onPress={() => navigation.navigate('AgentProfile', { agentId: item.id })}
-          style={styles.profileButton}
-        >
-          View Profile
-        </Button>
-        <Button 
           mode="contained" 
-          onPress={() => navigation.navigate('Booking', { 
-            agentId: item.id, 
-            agentName: item.name,
-            categoryId: categoryId,
-            visitCharge: item.distance_km ? Math.round(item.distance_km * item.rate_per_km) : item.rate_per_km * 2 // Default 2km if no distance
+          onPress={() => navigation.navigate('BookingConfirmation', {
+            agent: item,
+            selectedCategory: categoryName || 'Service',
+            selectedSubcategory: null
           })}
           style={styles.bookButton}
           disabled={!item.is_online}
         >
-          {item.is_online 
-            ? `Pay ₹${item.distance_km ? Math.round(item.distance_km * item.rate_per_km) : Math.round(item.rate_per_km * 2)} Visit Charge` 
-            : 'Unavailable'
-          }
+          {item.is_online ? 'Book Now' : 'Unavailable'}
         </Button>
       </Card.Actions>
     </Card>

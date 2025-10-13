@@ -1,5 +1,6 @@
 import config from '../config';
 import { getToken } from './authService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { API_URL: API_BASE_URL } = config;
 
@@ -103,6 +104,14 @@ export const submitAgentOnboarding = async (onboardingData) => {
 
     const result = await response.json();
     console.log('✅ Agent onboarding completed successfully:', result);
+    
+    // Cache initial wallet balance of 1000 for new agents
+    try {
+      await AsyncStorage.setItem('agent_wallet_balance', '1000');
+      console.log('💳 Initial wallet balance (1000) cached successfully');
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache initial wallet balance:', cacheError);
+    }
     
     return result;
 

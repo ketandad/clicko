@@ -9,6 +9,8 @@ import {
   Dimensions,
   Animated,
   Alert,
+  Modal,
+  Vibration,
 } from 'react-native';
 import {
   Text,
@@ -26,10 +28,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { updateAgentStatus, getAgentStats, updateAgentLocation } from '../services/agentService';
-import { notificationService } from '../services/notificationService';
-import { notificationTestService } from '../services/notificationTestService';
+import config from '../config';
 
 const { width } = Dimensions.get('window');
 
@@ -62,6 +65,15 @@ const darkTheme = {
 export default function AgentHomeScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { 
+    setAgentOnlineStatus, 
+    isConnected, 
+    currentBookingRequest, 
+    showBookingModal, 
+    acceptBookingRequest, 
+    rejectBookingRequest, 
+    closeBookingModal 
+  } = useNotifications();
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,19 +105,13 @@ export default function AgentHomeScreen() {
 
   // Remove dummy pending requests - will be replaced with real data
   const [pendingRequests, setPendingRequests] = useState([]);
-  
-  // WebSocket connection for real-time notifications
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = React.useRef(null);
 
   useEffect(() => {
     StatusBar.setBarStyle('light-content');
     loadAgentData();
     
-    // Connect to notifications if agent is online
-    if (isOnline && user?.id) {
-      connectToNotifications();
-    }
+    // Load agent's saved online status
+    loadAgentOnlineStatus();
     
     // Update agent data with real user info
     if (user) {
@@ -124,6 +130,33 @@ export default function AgentHomeScreen() {
       useNativeDriver: true,
     }).start();
   }, [user]);
+
+  const loadAgentOnlineStatus = async () => {
+    try {
+      const savedStatus = await AsyncStorage.getItem('agentOnlineStatus');
+      if (savedStatus !== null) {
+        const onlineStatus = savedStatus === 'true';
+        setIsOnline(onlineStatus);
+        
+        // Force WebSocket connection if agent was previously online
+        if (onlineStatus) {
+          console.log('🔄 Agent was previously online, forcing WebSocket connection...');
+          // Force connection with forceOnline=true to bypass online status check
+          await setAgentOnlineStatus(true);
+
+        }
+      } else {
+        // If no saved status, default to offline
+        console.log('📱 No saved online status found, defaulting to offline');
+        setIsOnline(false);
+      }
+    } catch (error) {
+      console.error('❌ Error loading agent online status:', error);
+      setIsOnline(false);
+    }
+  };
+
+
 
   const loadAgentData = async () => {
     try {
@@ -149,7 +182,7 @@ export default function AgentHomeScreen() {
         rating: stats.avg_rating,
       }));
       
-      console.log('✅ Agent data loaded successfully');
+
     } catch (error) {
       console.error('❌ Error loading agent data:', error);
     } finally {
@@ -225,7 +258,6 @@ export default function AgentHomeScreen() {
     // Cleanup interval on component unmount
     return () => {
       clearInterval(locationInterval);
-      disconnectFromNotifications();
       console.log('🛑 Location auto-update stopped');
     };
   }, []);
@@ -235,20 +267,31 @@ export default function AgentHomeScreen() {
       const newStatus = !isOnline;
       console.log('🔄 Updating agent status to:', newStatus ? 'online' : 'offline');
       
-      // Call the API to update status in database
+      // Always update status in database first
       await updateAgentStatus(newStatus);
       
-      // Update local state only after successful API call
+      // Update local state after successful API call
       setIsOnline(newStatus);
       
-      // Connect/disconnect WebSocket based on status
-      if (newStatus && user?.id) {
-        connectToNotifications();
-      } else {
-        disconnectFromNotifications();
-      }
+      // Update notification context with online status
+      await setAgentOnlineStatus(newStatus);
       
-      console.log('✅ Agent status updated successfully:', newStatus ? 'Online' : 'Offline');
+      if (newStatus) {
+        // Going online - notifications work globally on any screen
+        Alert.alert(
+          '🟢 You are now Online!',
+          '✅ Ready to receive bookings on any screen\n🔔 Notifications will appear automatically when customers book you',
+          [{ text: 'Got it!', style: 'default' }]
+        );
+      } else {
+        // Going offline
+        Alert.alert(
+          '⚪ You are now Offline',
+          'You will not receive any booking requests until you go online again.',
+          [{ text: 'OK', style: 'default' }]
+        );
+      }
+
     } catch (error) {
       console.error('❌ Error updating agent status:', error);
       // Show error message to user
@@ -260,127 +303,10 @@ export default function AgentHomeScreen() {
     }
   };
 
-  const connectToNotifications = () => {
-    if (!user?.id) return;
+  // Note: WebSocket connection logic is now handled by NotificationContext
+  // The global NotificationContext manages the connection based on agent online status
 
-    // Add listener for notification events
-    const removeListener = notificationService.addListener((event, data) => {
-      switch (event) {
-        case 'connected':
-          setWsConnected(true);
-          notificationService.startHeartbeat();
-          break;
-          
-        case 'disconnected':
-          setWsConnected(false);
-          notificationService.stopHeartbeat();
-          break;
-          
-        case 'booking_request':
-          console.log('🔔 New booking request received');
-          
-          // Update pending bookings count
-          setAgentData(prev => ({
-            ...prev,
-            pendingBookings: prev.pendingBookings + 1
-          }));
-          
-          // Navigate to notification screen immediately for bell notification
-          navigation.navigate('AgentNotifications', { 
-            agentId: user?.id, 
-            authToken: user?.token 
-          });
-          break;
-          
-        case 'response_confirmed':
-          console.log('✅ Response confirmed');
-          loadAgentData(); // Refresh data
-          break;
-          
-        case 'status_update':
-          console.log('📢 Booking status update');
-          loadAgentData(); // Refresh data
-          break;
-          
-        case 'system_message':
-          Alert.alert('System Message', data.message);
-          break;
-          
-        case 'error':
-          console.error('🚨 Notification error:', data);
-          break;
-          
-        default:
-          console.log('Unknown notification event:', event);
-      }
-    });
 
-    // Store listener cleanup function
-    wsRef.current = removeListener;
-    
-    // Connect to notification service
-    notificationService.connect(user.id, user.token);
-  };
-
-  const disconnectFromNotifications = () => {
-    // Remove listener
-    if (wsRef.current) {
-      wsRef.current(); // Call cleanup function
-      wsRef.current = null;
-    }
-    
-    // Disconnect from notification service
-    notificationService.disconnect();
-    setWsConnected(false);
-  };
-
-  const testNotification = async () => {
-    if (!user?.id) {
-      Alert.alert('Error', 'User ID not available for testing');
-      return;
-    }
-
-    try {
-      console.log('🧪 Testing notification system...');
-      
-      // Check if backend is available
-      const backendAvailable = await notificationTestService.checkBackendConnection();
-      
-      if (!backendAvailable) {
-        Alert.alert(
-          'Backend Not Available',
-          'The backend server is not running. Please start the backend to test notifications.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // Send test notification
-      await notificationTestService.simulateBookingNotification(user.id);
-      
-      Alert.alert(
-        'Test Notification Sent',
-        'A test booking notification has been sent! If you\'re connected to WebSocket, you should receive it shortly.',
-        [
-          {
-            text: 'View Notifications',
-            onPress: () => navigation.navigate('AgentNotifications', { 
-              agentId: user?.id, 
-              authToken: user?.token 
-            })
-          },
-          { text: 'OK' }
-        ]
-      );
-      
-    } catch (error) {
-      Alert.alert(
-        'Test Failed',
-        `Failed to send test notification: ${error.message}`,
-        [{ text: 'OK' }]
-      );
-    }
-  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -389,13 +315,15 @@ export default function AgentHomeScreen() {
   };
 
   const acceptBooking = (bookingId) => {
-    console.log('Accepting booking:', bookingId);
+
     // TODO: Accept booking API call
     navigation.navigate('BookingDetails', { bookingId });
   };
 
+
+
   const rejectBooking = (bookingId) => {
-    console.log('Rejecting booking:', bookingId);
+
     setPendingRequests(prev => prev.filter(req => req.id !== bookingId));
   };
 
@@ -443,7 +371,7 @@ export default function AgentHomeScreen() {
               {/* Connection indicator dot */}
               <View style={[
                 styles.connectionDot, 
-                { backgroundColor: wsConnected ? darkTheme.success : darkTheme.error }
+                { backgroundColor: isConnected ? darkTheme.success : darkTheme.error }
               ]} />
               {agentData.pendingBookings > 0 && (
                 <View style={styles.notificationBadge}>
@@ -501,6 +429,8 @@ export default function AgentHomeScreen() {
       </Card>
     </View>
   );
+
+
 
   const renderEarningsOverview = () => (
     <Card style={[styles.earningsCard, { backgroundColor: darkTheme.surface }]}>
@@ -636,26 +566,14 @@ export default function AgentHomeScreen() {
           <MaterialCommunityIcons 
             name="bell-ring" 
             size={24} 
-            color={wsConnected ? darkTheme.success : darkTheme.error} 
+            color={isConnected ? darkTheme.success : darkTheme.error} 
           />
           <Text style={[styles.quickActionText, { color: darkTheme.text }]}>
             Notifications {agentData.pendingBookings > 0 ? `(${agentData.pendingBookings})` : ''}
           </Text>
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={[styles.quickAction, { backgroundColor: darkTheme.accent, opacity: 0.8 }]}
-          onPress={testNotification}
-        >
-          <MaterialCommunityIcons 
-            name="bell-ring-outline" 
-            size={24} 
-            color="white" 
-          />
-          <Text style={[styles.quickActionText, { color: 'white', fontSize: 12 }]}>
-            Test Notification
-          </Text>
-        </TouchableOpacity>
+
       </View>
     </View>
   );
@@ -683,20 +601,33 @@ export default function AgentHomeScreen() {
       </View>
       
       {/* Notification Status Indicator */}
-      <View style={styles.notificationStatus}>
+      <TouchableOpacity 
+        style={styles.notificationStatus}
+        onPress={async () => {
+          if (!isConnected && isOnline) {
+            console.log('🔄 Manual WebSocket reconnection attempt...');
+            await setAgentOnlineStatus(true);
+          }
+        }}
+      >
         <View style={[
           styles.notificationStatusDot, 
-          { backgroundColor: wsConnected ? darkTheme.success : darkTheme.error }
+          { backgroundColor: isConnected ? darkTheme.success : darkTheme.error }
         ]} />
         <Text style={styles.notificationStatusText}>
-          {wsConnected ? 'Notifications Active' : 'Notifications Offline'}
+          {isConnected ? 'Notifications Active' : 'Notifications Offline'}
         </Text>
+        {!isConnected && isOnline && (
+          <Text style={[styles.notificationStatusText, { color: darkTheme.warning, fontSize: 11 }]}>
+            • Tap to retry connection
+          </Text>
+        )}
         {agentData.pendingBookings > 0 && (
           <Text style={[styles.notificationStatusText, { color: darkTheme.warning }]}>
             • {agentData.pendingBookings} pending
           </Text>
         )}
-      </View>
+      </TouchableOpacity>
     </View>
   );
 
@@ -727,6 +658,63 @@ export default function AgentHomeScreen() {
         style={[styles.fab, { backgroundColor: darkTheme.primary }]}
         onPress={() => navigation.navigate('CreateService')}
       />
+      
+      {/* Booking Notification Modal */}
+      <Modal
+        visible={showBookingModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeBookingModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {currentBookingRequest && (
+              <>
+                <View style={styles.modalHeader}>
+                  <MaterialCommunityIcons name="bell-ring" size={32} color={darkTheme.primary} />
+                  <Text style={styles.modalTitle}>New Booking Request!</Text>
+                </View>
+                
+                <View style={styles.bookingDetails}>
+                  <Text style={styles.customerName}>
+                    Customer: {currentBookingRequest.user_name || 'Unknown Customer'}
+                  </Text>
+                  <Text style={styles.serviceType}>
+                    Service: {currentBookingRequest.service_category}
+                  </Text>
+                  <Text style={styles.serviceAddress}>
+                    Address: {currentBookingRequest.service_address}
+                  </Text>
+                  <Text style={styles.totalAmount}>
+                    Total: ₹{currentBookingRequest.total_amount}
+                  </Text>
+                  {currentBookingRequest.is_emergency && (
+                    <View style={styles.emergencyBadge}>
+                      <Text style={styles.emergencyText}>🚨 EMERGENCY</Text>
+                    </View>
+                  )}
+                </View>
+                
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.rejectButton]}
+                    onPress={() => rejectBookingRequest('Agent declined')}
+                  >
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.acceptButton]}
+                    onPress={() => acceptBookingRequest()}
+                  >
+                    <Text style={styles.acceptButtonText}>Accept</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1092,5 +1080,97 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     elevation: 8,
+  },
+  // Booking Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: darkTheme.surface,
+    borderRadius: 20,
+    padding: 20,
+    margin: 20,
+    width: '90%',
+    maxWidth: 400,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: darkTheme.text,
+    marginLeft: 10,
+  },
+  bookingDetails: {
+    marginBottom: 20,
+  },
+  customerName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: darkTheme.text,
+    marginBottom: 8,
+  },
+  serviceType: {
+    fontSize: 14,
+    color: darkTheme.textSecondary,
+    marginBottom: 6,
+  },
+  serviceAddress: {
+    fontSize: 14,
+    color: darkTheme.textSecondary,
+    marginBottom: 6,
+  },
+  totalAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: darkTheme.primary,
+    marginTop: 8,
+  },
+  emergencyBadge: {
+    backgroundColor: darkTheme.accent,
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  emergencyText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 15,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  acceptButton: {
+    backgroundColor: darkTheme.primary,
+  },
+  rejectButton: {
+    backgroundColor: darkTheme.accent,
+  },
+  acceptButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  rejectButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

@@ -5,10 +5,14 @@ from datetime import datetime
 from ..database import get_db
 from ..auth.jwt import get_current_user
 from ..user.models import User, Agent, Category, AgentCategory, SubCategory, AgentSubCategory, AgentServicePricing
+from ..notifications.websocket_manager import notification_manager
 from pydantic import BaseModel
 import sqlalchemy as sa
 from sqlalchemy.sql.expression import func
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -253,7 +257,7 @@ async def get_nearby_agents(
             User, Agent.user_id == User.id
         ).filter(
             Agent.kyc_status == 'verified',
-            Agent.is_online == True,  # Only online agents
+            # Note: Not filtering by is_online here - will validate WebSocket connectivity below
             Agent.is_location_enabled == True,  # Only agents sharing location
             # Agent must have location data (current or base)
             sa.or_(
@@ -284,6 +288,16 @@ async def get_nearby_agents(
             if not agent_lat or not agent_lng:
                 continue  # Skip agents without location
             
+            # Only show agents who are truly available (database + WebSocket)
+            try:
+                from ..notifications.websocket_manager import notification_manager
+                agent_available = await notification_manager.is_agent_online(agent_data.id)
+                if not agent_available:
+                    continue  # Skip agents that aren't actually connected and listening
+            except Exception as e:
+                logger.warning(f"Could not verify connectivity for agent {agent_data.id}: {e}")
+                continue  # Skip agents we can't verify
+
             # Calculate distance using efficient formula
             distance = calculate_distance(latitude, longitude, agent_lat, agent_lng)
             
@@ -305,7 +319,7 @@ async def get_nearby_agents(
                 user_id=agent_data.user_id,
                 name=agent_data.user_name,
                 rate_per_km=agent_data.rate_per_km,
-                is_online=agent_data.is_online,
+                is_online=True, # If they made it here, they're truly online
                 avg_rating=agent_data.avg_rating,
                 total_ratings=agent_data.total_ratings,
                 distance_km=round(distance, 2),
@@ -1380,13 +1394,21 @@ async def update_agent_location(
     # Update user location (stored as "lat,lng")
     location_string = f"{location_data.latitude},{location_data.longitude}"
     current_user.location = location_string
-    
+
+    # Update agent's current latitude/longitude for nearby search
+    agent.current_latitude = location_data.latitude
+    agent.current_longitude = location_data.longitude
+
+    # Optionally enable location sharing if not already enabled
+    if not agent.is_location_enabled:
+        agent.is_location_enabled = True
+
     # Update timestamp
     from datetime import datetime
     agent.updated_at = datetime.utcnow()
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "message": "Location updated successfully",

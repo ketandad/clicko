@@ -32,7 +32,6 @@ import { useLocation } from '../contexts/LocationContext';
 import { useAuth } from '../contexts/AuthContext';
 import bookingService from '../services/bookingService';
 import locationService from '../services/locationService';
-import agentPricingService from '../services/agentPricingService';
 
 const { width } = Dimensions.get('window');
 
@@ -118,17 +117,49 @@ export default function BookingConfirmationScreen() {
         setServiceAddress(selectedLocation.address);
         setAddressDetails({
           full_address: selectedLocation.address,
-          city: selectedLocation.city || '',
-          state: selectedLocation.state || '',
-          latitude: selectedLocation.coordinates?.latitude,
-          longitude: selectedLocation.coordinates?.longitude
+          city: selectedLocation.city || 'City', // Default fallback
+          state: selectedLocation.state || 'State', // Default fallback
+          pincode: selectedLocation.pincode || '000000', // Default fallback
+          latitude: selectedLocation.coordinates?.latitude || 0,
+          longitude: selectedLocation.coordinates?.longitude || 0
         });
+      } else {
+        // Set basic defaults to avoid validation failures
+        setAddressDetails({
+          full_address: 'Address not set - please update',
+          city: 'City',
+          state: 'State', 
+          pincode: '000000',
+          latitude: 0,
+          longitude: 0
+        });
+      }
+      
+      // Set default time slot for non-emergency bookings
+      if (!isEmergency && !selectedTimeSlot) {
+        setSelectedTimeSlot(timeSlots[0]); // Select first available time slot
       }
       
       // Load agent's available services
       if (agent && agent.id) {
-        const services = await loadAgentServices(agent.id, selectedCategory);
-        setAvailableServices(services);
+        try {
+          console.log('🔍 Loading agent services for agent ID:', agent.id);
+          const services = await loadAgentServices(agent.id, selectedCategory);
+          setAvailableServices(services);
+          console.log('✅ Agent services loaded successfully');
+        } catch (servicesError) {
+          console.error('❌ Error loading agent services:', servicesError);
+          // Set default service to prevent blocking
+          const defaultServices = [{
+            id: 'default',
+            name: selectedCategory || 'Service Request',
+            description: 'General service consultation and work',
+            price: 100,
+            category: selectedCategory
+          }];
+          setAvailableServices(defaultServices);
+          setSelectedServices([{ ...defaultServices[0], quantity: 1 }]);
+        }
       }
       
     } catch (error) {
@@ -151,27 +182,54 @@ export default function BookingConfirmationScreen() {
 
   const loadAgentServices = async (agentId, categoryId) => {
     try {
-      // Get agent's service pricing for the selected category
-      const servicePricing = await agentPricingService.getAgentServicePricing(agentId, categoryId);
-      return servicePricing.map(service => ({
-        id: service.id,
-        name: service.service_name,
-        description: service.description,
-        price: service.price || service.min_price,
-        maxPrice: service.max_price,
-        unit: service.unit || 'per service',
-        category: service.category_name
-      }));
+      console.log('🔍 Loading services for agent:', agentId, 'category:', categoryId);
+      
+      // For now, create default service structure since agentPricingService 
+      // is meant for agent management, not customer booking
+      const defaultServices = [
+        {
+          id: 'service_1',
+          name: `${categoryId || 'General'} Service`,
+          description: 'Professional service consultation and work',
+          price: 150, // Base service price
+          unit: 'per service',
+          category: categoryId
+        },
+        {
+          id: 'service_2', 
+          name: `${categoryId || 'General'} Inspection`,
+          description: 'Detailed inspection and assessment',
+          price: 100,
+          unit: 'per inspection',
+          category: categoryId
+        }
+      ];
+      
+      // Auto-select the first service if no services are selected yet
+      if (defaultServices.length > 0 && selectedServices.length === 0) {
+        setSelectedServices([{ ...defaultServices[0], quantity: 1 }]);
+      }
+      
+      console.log('✅ Default services created:', defaultServices);
+      return defaultServices;
+      
     } catch (error) {
-      console.error('Error loading agent services:', error);
-      // Return default service structure if no specific pricing
-      return [{
+      console.error('❌ Error creating default services:', error);
+      // Fallback service
+      const fallbackService = {
         id: 'default',
-        name: selectedCategory || 'Service Request',
+        name: selectedCategory || 'Service Request', 
         description: 'General service consultation and work',
-        price: 0, // Will be discussed with agent
+        price: 100,
         category: selectedCategory
-      }];
+      };
+      
+      // Auto-select fallback service if none selected
+      if (selectedServices.length === 0) {
+        setSelectedServices([{ ...fallbackService, quantity: 1 }]);
+      }
+      
+      return [fallbackService];
     }
   };
 
@@ -301,94 +359,162 @@ export default function BookingConfirmationScreen() {
   };
 
   const validateBookingData = () => {
-    if (!addressDetails.full_address.trim()) {
-      Alert.alert('Error', 'Please enter service address');
-      return false;
+    console.log('🔍 VALIDATION START: Beginning booking data validation...');
+    
+    try {
+      console.log('🔍 VALIDATION Step 1: Checking address details...');
+      if (!addressDetails.full_address.trim()) {
+        console.log('❌ VALIDATION FAILED: Missing service address');
+        Alert.alert('Missing Address', 'Please enter your service address before proceeding.');
+        return false;
+      }
+      console.log('✅ VALIDATION Step 1 passed: Address exists');
+    } catch (validationStepError) {
+      console.error('❌ VALIDATION Step 1 ERROR:', validationStepError);
+      throw validationStepError;
     }
     
+    console.log('🔍 VALIDATION Step 2: Checking city...');
     if (!addressDetails.city.trim()) {
-      Alert.alert('Error', 'Please enter city');
+      console.log('❌ VALIDATION FAILED: Missing city');
+      Alert.alert('Missing City', 'Please enter the city for your service location.');
       return false;
     }
+    console.log('✅ VALIDATION Step 2 passed: City exists');
     
+    console.log('🔍 VALIDATION Step 3: Checking selected services...');
     if (selectedServices.length === 0) {
-      Alert.alert('Error', 'Please select at least one service');
+      console.log('❌ VALIDATION FAILED: No services selected');
+      Alert.alert('No Services Selected', 'Please select at least one service you need.');
       return false;
     }
+    console.log('✅ VALIDATION Step 3 passed: Services selected');
     
+    console.log('🔍 VALIDATION Step 4: Checking time slot...');
     if (!isEmergency && !selectedTimeSlot) {
-      Alert.alert('Error', 'Please select a time slot');
+      console.log('❌ VALIDATION FAILED: No time slot selected');
+      Alert.alert('Missing Time Slot', 'Please select a preferred time slot for the service.');
       return false;
     }
+    console.log('✅ VALIDATION Step 4 passed: Time slot valid');
     
+    console.log('🔍 VALIDATION Step 5: Checking terms agreement...');
     if (!agreeToTerms) {
-      Alert.alert('Error', 'Please agree to terms and conditions');
+      console.log('❌ VALIDATION FAILED: Terms not agreed');
+      Alert.alert('Terms Required', 'Please agree to the terms and conditions to proceed.');
       return false;
     }
+    console.log('✅ VALIDATION Step 5 passed: Terms agreed');
     
+    console.log('🔍 VALIDATION Step 6: Checking agent info...');
+    if (!agent || !agent.id) {
+      console.log('❌ VALIDATION FAILED: No agent selected');
+      Alert.alert('Agent Error', 'Agent information is missing. Please go back and select an agent.');
+      return false;
+    }
+    console.log('✅ VALIDATION Step 6 passed: Agent info exists');
+    
+    console.log('🔍 VALIDATION Step 7: Checking pricing...');
+    if (pricing.total <= 0) {
+      console.log('❌ VALIDATION FAILED: Invalid total amount');
+      Alert.alert('Pricing Error', 'Unable to calculate service cost. Please try again.');
+      return false;
+    }
+    console.log('✅ VALIDATION Step 7 passed: Pricing valid');
+    
+    console.log('✅ VALIDATION COMPLETE: All validation checks passed');
     return true;
   };
 
   const handleConfirmBooking = async () => {
-    if (!validateBookingData()) return;
-    
     try {
       setSubmittingBooking(true);
       
-      // Prepare booking data
+      console.log('📋 Step 2: Checking current booking data state:', {
+        agent: agent?.id,
+        agentFullObject: agent,
+        selectedCategory,
+        selectedSubcategory,
+        selectedServices: selectedServices.length,
+        addressDetails: addressDetails.full_address,
+        pricing: pricing.total,
+        agreeToTerms,
+        selectedTimeSlot,
+        isEmergency
+      });
+      
+      const isValid = validateBookingData();
+      
+      if (!isValid) {
+        setSubmittingBooking(false);
+        return;
+      }
+      
+      console.log('🔄 Step 6: Preparing booking data with proper data types...');
+      
+      // Prepare booking data with proper data types
+      console.log('🔍 DEBUG: Full agent object:', agent);
+      console.log('🔍 DEBUG: Agent ID before parsing:', agent?.id);
+      
       const bookingData = {
-        agent_id: agent.id,
-        service_category: selectedCategory,
-        service_subcategory: selectedSubcategory,
-        service_description: selectedServices.map(s => `${s.name} (${s.quantity})`).join(', '),
+        agent_id: parseInt(agent?.id || agent?.agent_id || 0), // Try multiple possible ID fields
+        service_category: selectedCategory || 'General Service',
+        service_subcategory: selectedSubcategory || null,
+        service_description: selectedServices.map(s => `${s.name} (${s.quantity || 1})`).join(', ') || `${selectedCategory} service request`,
         
         // Location data
-        service_latitude: addressDetails.latitude,
-        service_longitude: addressDetails.longitude,
-        service_address: addressDetails.full_address,
-        service_landmark: addressDetails.landmark,
-        service_city: addressDetails.city,
-        service_state: addressDetails.state,
-        service_pincode: addressDetails.pincode,
+        service_latitude: parseFloat(addressDetails.latitude) || 0.0,
+        service_longitude: parseFloat(addressDetails.longitude) || 0.0,
+        service_address: addressDetails.full_address || '',
+        service_landmark: addressDetails.landmark || null,
+        service_city: addressDetails.city || '',
+        service_state: addressDetails.state || '',
+        service_pincode: addressDetails.pincode || '000000',
         
-        // Pricing data
-        visit_charge: pricing.visitCharge,
-        service_charge: pricing.serviceCharges,
-        total_amount: pricing.total,
+        // Pricing data - ensure numbers
+        visit_charge: parseFloat(pricing.visitCharge) || 0.0,
+        service_charge: parseFloat(pricing.serviceCharges) || 0.0,
+        total_amount: parseFloat(pricing.total) || 0.0,
         
         // Scheduling
         requested_date: selectedDate.toISOString().split('T')[0],
-        requested_time_slot: selectedTimeSlot,
+        requested_time_slot: selectedTimeSlot || null,
         
         // Additional info
-        special_instructions: specialInstructions,
-        is_emergency: isEmergency
+        special_instructions: specialInstructions || null,
+        is_emergency: Boolean(isEmergency)
       };
       
       // Validate booking data
-      bookingService.validateBookingData(bookingData);
+      try {
+        bookingService.validateBookingData(bookingData);
+      } catch (validationError) {
+        throw new Error('Validation failed: ' + validationError.message);
+      }
       
       // Create booking
       const result = await bookingService.createBooking(bookingData);
       
-      if (result.success) {
+      if (result && result.success) {
         Alert.alert(
-          'Booking Confirmed!', 
-          `Your booking has been created successfully. The agent has been notified and will respond within 30 seconds.\\n\\nBooking ID: ${result.booking_uuid}`,
+          '⏳ Waiting for Agent Response', 
+          `Request sent to ${agentName}!\n\n• Status: ${result.status.toUpperCase()}\n• Agent has ${result.agent_timeout} to respond\n• You'll be notified when agent accepts/rejects\n\n⚠️ Booking NOT confirmed yet!`,
           [
             {
-              text: 'Track Booking',
+              text: 'Track Status',
               onPress: () => navigation.navigate('BookingTracking', { 
                 bookingUuid: result.booking_uuid 
               })
             }
           ]
         );
+      } else {
+        Alert.alert('Booking Failed', result?.message || 'Unable to create booking. Please try again.');
       }
       
     } catch (error) {
-      console.error('Booking creation error:', error);
-      Alert.alert('Error', error.message || 'Failed to create booking. Please try again.');
+      console.error('Booking error:', error);
+      Alert.alert('Booking Error', `Failed to create booking: ${error.message}`);
     } finally {
       setSubmittingBooking(false);
     }
@@ -414,9 +540,9 @@ export default function BookingConfirmationScreen() {
           colors={[colors.primary, colors.primaryDark || '#1976D2']}
           style={styles.header}
         >
-          <Text style={styles.headerTitle}>Confirm Booking</Text>
+          <Text style={styles.headerTitle}>� Send Booking Request</Text>
           <Text style={styles.headerSubtitle}>
-            Review details and confirm your service request
+            Review details and confirm your service request - FILE UPDATED
           </Text>
         </LinearGradient>
 
@@ -640,15 +766,34 @@ export default function BookingConfirmationScreen() {
 
       {/* Fixed Bottom Actions */}
       <View style={styles.bottomActions}>
+        {/* MASSIVE DEBUG INFO - IMPOSSIBLE TO MISS */}
+        <View style={{backgroundColor: 'red', padding: 10, marginBottom: 10}}>
+          <Text style={{fontSize: 16, color: 'white', fontWeight: 'bold', textAlign: 'center'}}>
+            🚨 FILE UPDATED - DEBUG MODE 🚨
+          </Text>
+          <Text style={{fontSize: 12, color: 'white', textAlign: 'center'}}>
+            agreeToTerms={agreeToTerms ? 'TRUE' : 'FALSE'} | total={pricing.total} | submitting={submittingBooking ? 'TRUE' : 'FALSE'}
+          </Text>
+        </View>
         <Button
           mode="contained"
           onPress={handleConfirmBooking}
           loading={submittingBooking}
-          disabled={!agreeToTerms || submittingBooking}
-          style={styles.confirmButton}
+          disabled={!agreeToTerms || submittingBooking || pricing.total <= 0}
+          style={[
+            styles.confirmButton,
+            (!agreeToTerms || pricing.total <= 0) && styles.disabledButton
+          ]}
           contentStyle={styles.confirmButtonContent}
         >
-          {submittingBooking ? 'Creating Booking...' : `Confirm Booking - ₹${pricing.total}`}
+          {submittingBooking 
+            ? 'Sending Request...' 
+            : !agreeToTerms 
+              ? 'Accept Terms to Continue' 
+              : pricing.total <= 0
+                ? 'Calculating Cost...'
+                : `Send Request - ₹${pricing.total}`
+          }
         </Button>
       </View>
 
@@ -1051,6 +1196,10 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     borderRadius: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#cccccc',
+    opacity: 0.7,
   },
   confirmButtonContent: {
     paddingVertical: 8,

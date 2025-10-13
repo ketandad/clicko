@@ -4,7 +4,7 @@
  * Displays incoming booking requests with accept/reject functionality
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,13 @@ import {
   Animated,
   Dimensions,
   ScrollView,
-  Image
+  Image,
+  Platform
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import config from '../config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,25 +38,94 @@ const AgentNotificationScreen = ({ route, navigation }) => {
   const [isProcessingResponse, setIsProcessingResponse] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [notificationHistory, setNotificationHistory] = useState([]);
+  const [timeRemaining, setTimeRemaining] = useState(120); // 2 minutes in seconds
 
   // Refs for audio and animations
   const websocketRef = useRef(null);
   const bellSoundRef = useRef(null);
+  const bellIntervalRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const reconnectTimeoutRef = useRef(null);
 
+  // Agent status API functions (Swiggy/Zomato pattern - server-side status)
+  const updateAgentStatus = async (isOnline) => {
+    try {
+      console.log(`🔄 Updating agent status to: ${isOnline ? 'online' : 'offline'}`);
+      const response = await fetch(`${config.API_URL}/agents/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ is_online: isOnline })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`✅ Agent status updated: ${data.message}`);
+      return data.is_online;
+    } catch (error) {
+      console.error('❌ Error updating agent status:', error);
+      throw error;
+    }
+  };
+
+  const getAgentStatus = async () => {
+    try {
+      console.log('🔍 Fetching current agent status from server...');
+      const response = await fetch(`${config.API_URL}/agents/profile/${agentId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(`✅ Current agent status: ${data.is_online ? 'online' : 'offline'}`);
+      return data.is_online;
+    } catch (error) {
+      console.error('❌ Error fetching agent status:', error);
+      return false; // Default to offline if can't fetch
+    }
+  };
+
   // WebSocket connection management
   useEffect(() => {
-    connectWebSocket();
-    loadBellSound();
+    const initializeAgent = async () => {
+      try {
+        // Mark agent as online when screen opens (Swiggy/Zomato pattern)
+        await updateAgentStatus(true);
+      } catch (error) {
+        console.error('Failed to set agent online:', error);
+        Alert.alert('Connection Error', 'Failed to go online. Please try again.');
+      }
+      
+      // Connect WebSocket and load resources
+      connectWebSocket();
+      loadBellSound();
+    };
+    
+    initializeAgent();
     
     // Handle app state changes
     const handleAppStateChange = (nextAppState) => {
       if (nextAppState === 'active') {
+        // Re-establish online status when app becomes active
+        updateAgentStatus(true).catch(error => {
+          console.error('Failed to set agent online on app active:', error);
+        });
         connectWebSocket();
       } else if (nextAppState === 'background') {
-        // Keep connection alive for notifications
+        // Keep connection alive for notifications but don't mark offline
+        // Agent stays online until they explicitly go offline or close app
       }
     };
     
@@ -63,11 +134,29 @@ const AgentNotificationScreen = ({ route, navigation }) => {
     return () => {
       subscription?.remove();
       disconnectWebSocket();
+      stopBellContinuously();
       if (bellSoundRef.current) {
         bellSoundRef.current.unloadAsync();
       }
+      // Mark agent as offline when screen unmounts (Swiggy/Zomato pattern)
+      updateAgentStatus(false).catch(error => {
+        console.error('Failed to set agent offline on unmount:', error);
+      });
     };
   }, [agentId]);
+
+  // Bell ringing effect - start immediately when notification arrives
+  useEffect(() => {
+    if (currentNotification) {
+      console.log('🔔 useEffect: Starting continuous bell for notification');
+      playBellContinuously();
+    } else {
+      console.log('🔔 useEffect: Stopping bell - no current notification');
+      stopBellContinuously();
+    }
+  }, [currentNotification, playBellContinuously]);
+
+
 
   const connectWebSocket = async () => {
     try {
@@ -77,13 +166,24 @@ const AgentNotificationScreen = ({ route, navigation }) => {
 
       setConnectionStatus('Connecting...');
       
-      // Use your backend WebSocket URL
-      const wsUrl = `ws://localhost:8000/api/notifications/ws/agent/${agentId}`;
+      // Get WebSocket URL from config (same logic as API URL)
+      const getWebSocketUrl = () => {
+        // Convert HTTP/HTTPS API URL to WebSocket URL
+        const apiUrl = config.API_URL;
+        let wsUrl = apiUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+        
+        // Add WebSocket endpoint path
+        wsUrl = `${wsUrl}/notifications/ws/agent/${agentId}`;
+        
+        console.log('🔌 WebSocket URL:', wsUrl);
+        return wsUrl;
+      };
+      
+      const wsUrl = getWebSocketUrl();
       
       websocketRef.current = new WebSocket(wsUrl);
       
       websocketRef.current.onopen = () => {
-        console.log('🔔 WebSocket connected for agent notifications');
         setIsConnected(true);
         setConnectionStatus('Connected');
         
@@ -94,8 +194,6 @@ const AgentNotificationScreen = ({ route, navigation }) => {
       websocketRef.current.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          console.log('📩 Received notification message:', message);
-          
           handleWebSocketMessage(message);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -103,7 +201,6 @@ const AgentNotificationScreen = ({ route, navigation }) => {
       };
       
       websocketRef.current.onclose = (event) => {
-        console.log('🔌 WebSocket disconnected:', event.code, event.reason);
         setIsConnected(false);
         setConnectionStatus('Disconnected');
         
@@ -113,18 +210,15 @@ const AgentNotificationScreen = ({ route, navigation }) => {
         }
         
         reconnectTimeoutRef.current = setTimeout(() => {
-          console.log('🔄 Attempting to reconnect...');
           connectWebSocket();
         }, 5000); // Reconnect after 5 seconds
       };
       
       websocketRef.current.onerror = (error) => {
-        console.error('🚨 WebSocket error:', error);
         setConnectionStatus('Connection Error');
       };
       
     } catch (error) {
-      console.error('Error connecting WebSocket:', error);
       setConnectionStatus('Connection Failed');
     }
   };
@@ -175,36 +269,39 @@ const AgentNotificationScreen = ({ route, navigation }) => {
         
       case 'pong':
         // Heartbeat response
-        console.log('💓 Heartbeat pong received');
         break;
         
       case 'error':
-        console.error('WebSocket error:', message.message);
         Alert.alert('Notification Error', message.message);
         break;
         
       default:
-        console.log('Unknown message type:', message.type);
+        break;
     }
   };
 
   const handleBellNotification = async (notification) => {
-    console.log('🔔 Bell notification received:', notification);
+    console.log('🔔 Bell notification received, starting alert...');
     
     // Add to pending notifications
     setPendingNotifications(prev => [...prev, notification]);
     
     // Show current notification if none is showing
     if (!currentNotification) {
+      console.log('🔔 Setting current notification and showing modal');
       setCurrentNotification(notification);
       setShowNotificationModal(true);
       
       // Start bell sound and vibration
+      console.log('🔔 Starting bell alert...');
       await startBellAlert();
       
       // Start visual animations
       startPulseAnimation();
       startShakeAnimation();
+      
+      // Start 2-minute countdown timer
+      startCountdownTimer();
     }
     
     // Add to history
@@ -219,22 +316,67 @@ const AgentNotificationScreen = ({ route, navigation }) => {
   };
 
   const loadBellSound = async () => {
+    // For now, skip sound loading and use vibration only
+    // In production, add a proper sound file and uncomment below
+    /*
     try {
       const { sound } = await Audio.Sound.createAsync(
-        // You'll need to add a bell sound file to assets/sounds/
-        require('../assets/sounds/bell-notification.mp3'), // Create this file
+        require('../assets/sounds/notification-bell.mp3'),
         {
           shouldPlay: false,
-          isLooping: true,
+          isLooping: false,
           volume: 1.0,
         }
       );
-      
       bellSoundRef.current = sound;
     } catch (error) {
-      console.error('Error loading bell sound:', error);
+      bellSoundRef.current = null;
     }
+    */
+    bellSoundRef.current = null; // Use vibration only for now
   };
+
+  const playBellContinuously = useCallback(() => {
+    console.log('🔔 playBellContinuously called');
+    
+    // Clear any existing interval first
+    if (bellIntervalRef.current) {
+      clearInterval(bellIntervalRef.current);
+      bellIntervalRef.current = null;
+    }
+    
+    if (currentNotification) {
+      const playBell = async () => {
+        console.log('🔔 Playing bell/vibration...');
+        // Play bell sound if available
+        if (bellSoundRef.current) {
+          try {
+            await bellSoundRef.current.replayAsync();
+            console.log('🔔 Sound played');
+          } catch (error) {
+            console.log('🔔 Sound failed, using vibration');
+            Vibration.vibrate(500);
+          }
+        } else {
+          console.log('🔔 No sound loaded, using vibration');
+          Vibration.vibrate(500);
+        }
+      };
+      
+      playBell(); // Play immediately
+      
+      // Then continue playing every 2 seconds
+      bellIntervalRef.current = setInterval(playBell, 2000);
+      console.log('🔔 Bell interval started');
+    }
+  }, [currentNotification]);
+
+  const stopBellContinuously = useCallback(() => {
+    if (bellIntervalRef.current) {
+      clearInterval(bellIntervalRef.current);
+      bellIntervalRef.current = null;
+    }
+  }, []);
 
   const startBellAlert = async () => {
     try {
@@ -242,10 +384,7 @@ const AgentNotificationScreen = ({ route, navigation }) => {
       const vibrationPattern = [0, 500, 200, 500, 200, 500]; // ms
       Vibration.vibrate(vibrationPattern, true); // true = repeat
       
-      // Play bell sound continuously
-      if (bellSoundRef.current) {
-        await bellSoundRef.current.replayAsync();
-      }
+      // Bell sound will be handled by useEffect when currentNotification changes
     } catch (error) {
       console.error('Error starting bell alert:', error);
     }
@@ -256,7 +395,8 @@ const AgentNotificationScreen = ({ route, navigation }) => {
       // Stop vibration
       Vibration.cancel();
       
-      // Stop bell sound
+      // Stop bell sound and interval
+      stopBellContinuously();
       if (bellSoundRef.current) {
         await bellSoundRef.current.stopAsync();
       }
@@ -291,6 +431,39 @@ const AgentNotificationScreen = ({ route, navigation }) => {
     pulse();
   };
 
+  const startCountdownTimer = () => {
+    setTimeRemaining(120); // Reset to 2 minutes
+    
+    const timer = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Auto-reject when timer expires
+          if (currentNotification && showNotificationModal) {
+            handleAgentResponse('rejected');
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    // Clear timer when notification is closed
+    return timer;
+  };
+
+  const formatCountdownTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const getCountdownColor = (seconds) => {
+    if (seconds > 60) return '#4CAF50'; // Green
+    if (seconds > 30) return '#FF9800'; // Orange  
+    return '#F44336'; // Red
+  };
+
   const startShakeAnimation = () => {
     const shake = () => {
       Animated.sequence([
@@ -317,6 +490,58 @@ const AgentNotificationScreen = ({ route, navigation }) => {
     try {
       // Stop bell alert immediately
       await stopBellAlert();
+
+      // If accepting booking, check wallet balance and charge fee
+      if (response === 'accepted') {
+        try {
+          // Import wallet service
+          const agentWalletService = (await import('../services/agentWalletService')).default;
+          
+          // Check if agent can accept bookings (sufficient balance)
+          const eligibility = await agentWalletService.canAcceptBookings(agentId);
+          
+          if (!eligibility.canAccept) {
+            Alert.alert(
+              'Insufficient Balance',
+              `Cannot accept booking: ${eligibility.reason}\n\nPlease recharge your wallet to continue accepting bookings.`,
+              [{ text: 'OK' }]
+            );
+            setIsProcessingResponse(false);
+            return;
+          }
+          
+          // Charge booking fee (20 Rs)
+          const bookingId = currentNotification.data?.booking_id;
+          if (bookingId) {
+            const chargeResult = await agentWalletService.chargeBookingFee(
+              agentId, 
+              bookingId, 
+              `Booking acceptance fee for ${bookingId}`
+            );
+            
+            console.log('💸 Booking fee charged successfully:', chargeResult);
+            
+            // Show fee charged message
+            Alert.alert(
+              'Booking Accepted',
+              `✅ Booking accepted successfully!\n💸 Fee charged: ₹20\n💰 Remaining balance: ₹${chargeResult.new_balance}`,
+              [{ text: 'OK' }]
+            );
+          }
+          
+        } catch (walletError) {
+          console.error('Wallet operation failed:', walletError);
+          
+          // Show wallet error and don't proceed with acceptance
+          Alert.alert(
+            'Wallet Error',
+            `Failed to process booking fee: ${walletError.message}\n\nBooking not accepted. Please try again.`,
+            [{ text: 'OK' }]
+          );
+          setIsProcessingResponse(false);
+          return;
+        }
+      }
       
       // Send response via WebSocket
       const responseMessage = {
@@ -325,7 +550,8 @@ const AgentNotificationScreen = ({ route, navigation }) => {
         response: response,
         data: {
           timestamp: new Date().toISOString(),
-          agent_id: agentId
+          agent_id: agentId,
+          booking_id: currentNotification.data?.booking_id
         }
       };
       
@@ -342,24 +568,28 @@ const AgentNotificationScreen = ({ route, navigation }) => {
         )
       );
       
-      // Show success message
-      const message = response === 'accepted' 
-        ? '✅ Booking accepted successfully!' 
-        : '❌ Booking rejected';
-      
-      Alert.alert(
-        'Response Sent',
-        message,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Close current notification and show next if any
-              closeCurrentNotification();
+      // Show appropriate success message
+      if (response === 'accepted') {
+        // Already showed acceptance message above with fee details
+      } else {
+        Alert.alert(
+          'Booking Rejected',
+          '❌ Booking rejected successfully',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                closeCurrentNotification();
+              }
             }
-          }
-        ]
-      );
+          ]
+        );
+      }
+      
+      // Close current notification for acceptance (since we already showed message)
+      if (response === 'accepted') {
+        closeCurrentNotification();
+      }
       
     } catch (error) {
       console.error('Error sending response:', error);
@@ -466,8 +696,14 @@ const AgentNotificationScreen = ({ route, navigation }) => {
               <Animated.View style={[styles.bellIcon, { transform: [{ scale: pulseAnim }] }]}>
                 <Ionicons name="notifications" size={32} color="#FF6B35" />
               </Animated.View>
-              <Text style={styles.modalTitle}>New Booking Request</Text>
-              {data.emergency && (
+              <View style={styles.headerTextContainer}>
+                <Text style={styles.modalTitle}>New Booking Request</Text>
+                <View style={[styles.countdownContainer, { backgroundColor: getCountdownColor(timeRemaining) }]}>
+                  <Ionicons name="timer" size={16} color="white" />
+                  <Text style={styles.countdownText}>{formatCountdownTime(timeRemaining)}</Text>
+                </View>
+              </View>
+              {(data.is_emergency || data.emergency) && (
                 <View style={styles.emergencyBadge}>
                   <Text style={styles.emergencyText}>EMERGENCY</Text>
                 </View>
@@ -480,20 +716,23 @@ const AgentNotificationScreen = ({ route, navigation }) => {
                 <Text style={styles.sectionTitle}>Customer Details</Text>
                 <View style={styles.customerInfo}>
                   <Ionicons name="person" size={20} color="#666" />
-                  <Text style={styles.customerName}>{data.customer_name}</Text>
+                  <Text style={styles.customerName}>{data.user_name || data.customer_name || 'Unknown Customer'}</Text>
                 </View>
                 <View style={styles.customerInfo}>
                   <Ionicons name="call" size={20} color="#666" />
-                  <Text style={styles.customerPhone}>{data.customer_phone}</Text>
+                  <Text style={styles.customerPhone}>{data.user_phone || data.customer_phone || 'Not provided'}</Text>
                 </View>
               </View>
 
               {/* Service Info */}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Service Details</Text>
-                <Text style={styles.serviceType}>{data.service_type}</Text>
-                {data.service_details && (
-                  <Text style={styles.serviceDetails}>{JSON.stringify(data.service_details)}</Text>
+                <Text style={styles.serviceType}>{data.service_category || data.service_type || 'Service Request'}</Text>
+                {data.service_subcategory && (
+                  <Text style={styles.serviceDetails}>Category: {data.service_subcategory}</Text>
+                )}
+                {data.service_description && (
+                  <Text style={styles.serviceDetails}>Details: {data.service_description}</Text>
                 )}
               </View>
 
@@ -502,20 +741,22 @@ const AgentNotificationScreen = ({ route, navigation }) => {
                 <Text style={styles.sectionTitle}>Location</Text>
                 <View style={styles.locationInfo}>
                   <Ionicons name="location" size={20} color="#666" />
-                  <Text style={styles.address}>{data.address}</Text>
+                  <Text style={styles.address}>{data.service_address || data.address || 'Location not provided'}</Text>
                 </View>
               </View>
 
               {/* Timing */}
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Scheduled Time</Text>
-                <View style={styles.timeInfo}>
-                  <Ionicons name="time" size={20} color="#666" />
-                  <Text style={styles.scheduledTime}>
-                    {formatTime(data.scheduled_time)}
-                  </Text>
+              {data.scheduled_time && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Scheduled Time</Text>
+                  <View style={styles.timeInfo}>
+                    <Ionicons name="time" size={20} color="#666" />
+                    <Text style={styles.scheduledTime}>
+                      {formatTime(data.scheduled_time)}
+                    </Text>
+                  </View>
                 </View>
-              </View>
+              )}
 
               {/* Pricing */}
               <View style={styles.section}>
@@ -523,24 +764,26 @@ const AgentNotificationScreen = ({ route, navigation }) => {
                 <View style={styles.pricingInfo}>
                   <View style={styles.priceRow}>
                     <Text style={styles.priceLabel}>Visit Charges:</Text>
-                    <Text style={styles.priceValue}>{formatCurrency(data.visit_charges)}</Text>
+                    <Text style={styles.priceValue}>{formatCurrency(data.visit_charge || data.visit_charges)}</Text>
                   </View>
                   <View style={styles.priceRow}>
                     <Text style={styles.priceLabel}>Service Charges:</Text>
-                    <Text style={styles.priceValue}>{formatCurrency(data.service_charges)}</Text>
+                    <Text style={styles.priceValue}>{formatCurrency(data.service_charge || data.service_charges)}</Text>
                   </View>
                   <View style={[styles.priceRow, styles.totalRow]}>
                     <Text style={styles.totalLabel}>Total Estimated:</Text>
-                    <Text style={styles.totalValue}>{formatCurrency(data.estimated_cost)}</Text>
+                    <Text style={styles.totalValue}>{formatCurrency(data.total_amount || data.estimated_cost)}</Text>
                   </View>
                 </View>
               </View>
 
               {/* Notes */}
-              {data.customer_notes && (
+              {(data.customer_notes || data.service_description || data.special_instructions) && (
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Customer Notes</Text>
-                  <Text style={styles.notes}>{data.customer_notes}</Text>
+                  <Text style={styles.sectionTitle}>Additional Notes</Text>
+                  <Text style={styles.notes}>
+                    {data.customer_notes || data.service_description || data.special_instructions}
+                  </Text>
                 </View>
               )}
             </ScrollView>
@@ -806,11 +1049,28 @@ const styles = StyleSheet.create({
   bellIcon: {
     marginBottom: 10,
   },
+  headerTextContainer: {
+    alignItems: 'center',
+  },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
+    marginBottom: 8,
+  },
+  countdownContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     marginBottom: 5,
+  },
+  countdownText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 4,
   },
   emergencyBadge: {
     backgroundColor: '#FF1744',

@@ -258,15 +258,27 @@ class BookingModel:
     
     def create_booking(self, booking_data: Dict[str, Any]) -> Optional[str]:
         """Create a new booking and return booking UUID"""
+        import logging
+        logger = logging.getLogger("booking")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
         try:
             import uuid
             booking_uuid = str(uuid.uuid4())
-            
-            # Calculate agent response timeout (30 seconds from now)
             timeout = datetime.now() + timedelta(seconds=30)
+            logger.info(f"[MODEL] Creating booking with payload: {booking_data}")
+            # Convert Decimal values to float for SQLite compatibility
+            visit_charge = booking_data.get('visit_charge', 0)
+            service_charge = booking_data.get('service_charge', 0)
+            total_amount = booking_data['total_amount']
+            
+            # Convert Decimal to float if needed
+            if hasattr(visit_charge, 'to_eng_string'):  # Check if it's a Decimal
+                visit_charge = float(visit_charge)
+            if hasattr(service_charge, 'to_eng_string'):  # Check if it's a Decimal
+                service_charge = float(service_charge)
+            if hasattr(total_amount, 'to_eng_string'):  # Check if it's a Decimal
+                total_amount = float(total_amount)
             
             cursor.execute("""
                 INSERT INTO bookings (
@@ -289,26 +301,25 @@ class BookingModel:
                 booking_data['service_city'],
                 booking_data['service_state'],
                 booking_data['service_pincode'],
-                booking_data.get('visit_charge', 0),
-                booking_data.get('service_charge', 0),
-                booking_data['total_amount'],
+                visit_charge,
+                service_charge,
+                total_amount,
                 booking_data.get('requested_date'),
                 booking_data.get('requested_time_slot'),
-                datetime.now(),  # agent_notified_at
-                timeout,  # agent_response_timeout
+                datetime.now(),
+                timeout,
                 booking_data.get('special_instructions'),
                 booking_data.get('is_emergency', False)
             ))
-            
             booking_id = cursor.lastrowid
-            
+            logger.info(f"[MODEL] Booking row created: id={booking_id}, uuid={booking_uuid}")
             # Add initial status history
             cursor.execute("""
                 INSERT INTO booking_status_history (
                     booking_id, new_status, changed_by_role, reason
                 ) VALUES (?, 'pending', 'customer', 'Booking created')
             """, (booking_id,))
-            
+            logger.info(f"[MODEL] Booking status history row created for booking_id={booking_id}")
             # Create bell notification for agent
             cursor.execute("""
                 INSERT INTO agent_notifications (
@@ -323,11 +334,12 @@ class BookingModel:
                 f"Customer wants {booking_data['service_category']} service at {booking_data['service_address']}. Total: ₹{booking_data['total_amount']}",
                 timeout,
             ))
-            
+            logger.info(f"[MODEL] Agent notification row created for agent_id={booking_data['agent_id']} booking_id={booking_id}")
             conn.commit()
+            logger.info(f"[MODEL] Booking committed successfully: uuid={booking_uuid}")
             return booking_uuid
-            
         except Exception as e:
+            logger.error(f"[MODEL] Exception during booking creation: {e}")
             conn.rollback()
             raise
         finally:

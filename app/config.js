@@ -1,36 +1,34 @@
-// config.js - Auto-generated configuration (Future-proof)
-import { Platform } from 'react-native';
+// config.js - Production Configuration for ClickO
 
 const isBrowser = typeof window !== 'undefined';
 
+// Get hostname safely
 let hostname = 'localhost';
 if (isBrowser && window.location) {
   hostname = window.location.hostname;
 }
 
+// Smart API URL detection
 const getApiUrl = () => {
-  // For React Native / Expo Go - use Platform.OS for reliable mobile detection
-  // Expo Go creates window object even on mobile, so typeof window check fails
-  if (Platform.OS === 'ios' || Platform.OS === 'android') {
+  // React Native / Expo Go environment
+  if (typeof window === 'undefined') {
+    return 'http://10.0.1.42:8000/api';
+  }
+  
+  // GitHub Codespace web environment
+  if (hostname.includes('github.dev') || hostname.includes('githubpreview.dev')) {
     return 'https://vigilant-trout-7q6q675j4vq2pg6w-8000.app.github.dev/api';
   }
   
-  // For web browsers - use current hostname logic
-  if (hostname.includes('github.dev') || hostname.includes('githubpreview.dev')) {
-    return 'https://' + hostname.replace(/^[^-]+-/, '').replace(/\.github\.dev$/, '') + '-8000.app.github.dev/api';
-  }
-  
-  if (hostname.includes('gitpod.io')) {
-    return 'https://8000-' + hostname + '/api';
-  }
-  
-  // Local development fallback
+  // Local development
   return 'http://localhost:8000/api';
 };
 
-const config = {
+export const config = {
   API_URL: getApiUrl(),
-  API_TIMEOUT: 30000,
+  API_TIMEOUT: 15000,
+  
+  // Theme colors - React Native Paper compatible
   colors: {
     primary: '#007AFF',
     secondary: '#5856D6', 
@@ -45,10 +43,10 @@ const config = {
     accent: '#FF3B30',
     disabled: '#C6C6C8'
   },
+  
+  // Development settings
   DEBUG: __DEV__ || false,
   LOG_LEVEL: 'info'
 };
-
-console.log('API Configuration:', config.API_URL);
 
 export default config;
